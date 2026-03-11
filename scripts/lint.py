@@ -5,6 +5,7 @@ Usage: python lint.py --file path/to/file.docx [--config .doc-lint.json] [--json
 """
 
 import sys
+import re
 import json
 import argparse
 from pathlib import Path
@@ -37,6 +38,9 @@ DEFAULT_CONFIG = {
         "orphaned-bold":        {"enabled": True, "severity": "info"},
         "mixed-fonts":          {"enabled": True, "severity": "info"},
         "multiline-heading":    {"enabled": True, "severity": "info"},
+        "numbered-heading-continuity": {"enabled": True, "severity": "warning"},
+        "template-compliance": {"enabled": True, "severity": "warning"},
+        "naming-convention":   {"enabled": True, "severity": "warning"},
     }
 }
 
@@ -45,13 +49,66 @@ SEVERITY_SYMBOL = {"error": "✖", "warning": "⚠", "info": "ℹ"}
 AUTO_FIXABLE = {
     "style-misuse", "font-normalization", "font-size-normalization",
     "list-normalization", "heading-level-skip", "single-item-list",
-    "mixed-fonts", "multiline-heading"
+    "mixed-fonts", "multiline-heading", "numbered-heading-continuity"
 }
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _detect_template(text: str) -> str:
+    """Infer document template type from plain text content."""
+    t = text.lower()
+    if any(k in t for k in ['annex a', 'iso 27001', '27001', 'isms']):
+        return 'iso27001'
+    if sum(1 for k in ['purpose', 'scope', 'policy statement', 'shall'] if k in t) >= 3:
+        return 'policy'
+    if sum(1 for k in ['steps', 'procedure', 'prerequisites'] if k in t) >= 2:
+        return 'procedure'
+    if sum(1 for k in ['attendees', 'agenda', 'action items', 'decisions'] if k in t) >= 2:
+        return 'meeting_minutes'
+    if sum(1 for k in ['trigger', 'flow steps', 'decision points'] if k in t) >= 2:
+        return 'workflow'
+    if t.count('\u2610') >= 5:
+        return 'checklist'
+    if t.count('\u2610') >= 3 or '___' in t:
+        return 'form'
+    return 'general'
+
+
+_REQUIRED_SECTIONS = {
+    'policy': [
+        'Purpose', 'Scope', 'Definitions', 'Roles and Responsibilities',
+        'Policy Statements', 'Compliance and Exceptions', 'Related Documents', 'Revision History',
+    ],
+    'procedure': [
+        'Purpose', 'Scope', 'Prerequisites', 'Procedure Steps',
+        'Exceptions and Escalations', 'Related Documents', 'Revision History',
+    ],
+    'workflow': [
+        'Purpose', 'Trigger', 'Roles Involved', 'Flow Steps',
+        'Decision Points', 'Outcomes', 'Related Documents',
+    ],
+    'form':          ['Instructions', 'Fields', 'Submission Guidance'],
+    'checklist':     ['Instructions', 'Checklist Items', 'Completion'],
+    'meeting_minutes': ['Attendees', 'Agenda', 'Decisions', 'Action Items'],
+    'iso27001': [
+        'Purpose', 'Scope', 'Definitions', 'Roles and Responsibilities',
+        'Policy Statements', 'Control Mapping', 'Compliance and Exceptions',
+        'Related Documents', 'Revision History',
+    ],
+}
+
+_NAMING_PATTERNS = {
+    'policy':          (re.compile(r'^[A-Z]+-POL-\d+[\s\-].+', re.I), 'ORG-POL-001 Title'),
+    'procedure':       (re.compile(r'^[A-Z]+-PRO-\d+[\s\-].+', re.I), 'ORG-PRO-001 Title'),
+    'workflow':        (re.compile(r'^[A-Z]+-WF-\d+[\s\-].+',  re.I), 'ORG-WF-001 Title'),
+    'form':            (re.compile(r'^[A-Z]+-FRM-\d+[\s\-].+', re.I), 'ORG-FRM-001 Title'),
+    'checklist':       (re.compile(r'^[A-Z]+-CHK-\d+[\s\-].+', re.I), 'ORG-CHK-001 Title'),
+    'meeting_minutes': (re.compile(r'^\d{4}-\d{2}-\d{2}.+',    re.I), '2026-01-01 Team Meeting Minutes'),
+    'iso27001':        (re.compile(r'^[A-Z]+-\d+[\s\-].+',     re.I), 'ORG-001-DOMAIN Title (Type)'),
+}
 
 def load_config(config_path):
     cfg = json.loads(json.dumps(DEFAULT_CONFIG))  # deep copy
@@ -314,6 +371,76 @@ def lint(path, cfg):
             "message": f'Mixed fonts in body text: {", ".join(sorted(body_fonts))}',
             "line": None, "text": "", "fixable": True
         })
+
+    # --- W012 Numbered heading continuity ---
+    if rule_enabled(cfg, 'numbered-heading-continuity'):
+        numbered_pat = re.compile(r'^(\d+)\.')
+        level_seqs = {}  # hlevel -> [(para_idx, number)]
+        for idx, para in enumerate(paras):
+            hlevel = heading_style_level(para.style.name)
+            if hlevel is None:
+                continue
+            m = numbered_pat.match(para.text.strip())
+            if m:
+                level_seqs.setdefault(hlevel, []).append((idx, int(m.group(1))))
+        for hlevel, seq in level_seqs.items():
+            if len(seq) < 2:
+                continue
+            for i in range(1, len(seq)):
+                prev_num = seq[i - 1][1]
+                curr_num, curr_idx = seq[i][1], seq[i][0]
+                if curr_num <= prev_num and curr_num == 1:
+                    issues.append({
+                        "rule": "numbered-heading-continuity", "code": "W012",
+                        "severity": rule_severity(cfg, 'numbered-heading-continuity'),
+                        "message": (
+                            f'Heading numbering restarts at H{hlevel}: '
+                            f'"{paras[curr_idx].text.strip()[:50]}" '
+                            f'(expected >{prev_num})'
+                        ),
+                        "line": curr_idx + 1, "text": paras[curr_idx].text[:60], "fixable": True
+                    })
+
+    # --- W013 Template compliance ---
+    if rule_enabled(cfg, 'template-compliance'):
+        full_text = ' '.join(p.text for p in paras)
+        template  = _detect_template(full_text)
+        required  = _REQUIRED_SECTIONS.get(template, [])
+        if required:
+            heading_texts = {
+                p.text.lower().strip()
+                for p in paras
+                if heading_style_level(p.style.name) is not None
+            }
+            missing = [s for s in required if s.lower() not in heading_texts]
+            if missing:
+                issues.append({
+                    "rule": "template-compliance", "code": "W013",
+                    "severity": rule_severity(cfg, 'template-compliance'),
+                    "message": (
+                        f'Template "{template}": missing required section(s): '
+                        f'{", ".join(missing)}'
+                    ),
+                    "line": None, "text": "", "fixable": False
+                })
+
+    # --- W014 Naming convention ---
+    if rule_enabled(cfg, 'naming-convention'):
+        full_text = ' '.join(p.text for p in paras)
+        template  = _detect_template(full_text)
+        if template in _NAMING_PATTERNS:
+            pattern, example = _NAMING_PATTERNS[template]
+            stem = Path(path).stem
+            if not pattern.match(stem):
+                issues.append({
+                    "rule": "naming-convention", "code": "W014",
+                    "severity": rule_severity(cfg, 'naming-convention'),
+                    "message": (
+                        f'Filename "{stem}" does not match {template} naming convention '
+                        f'(expected: {example})'
+                    ),
+                    "line": None, "text": "", "fixable": False
+                })
 
     issues.sort(key=lambda x: SEVERITY_ORDER.get(x["severity"], 9))
     return issues

@@ -5,6 +5,7 @@ Usage: python fix.py --file path/to/file.docx [--config .doc-lint.json] [--overw
 """
 
 import sys
+import re
 import json
 import copy
 import argparse
@@ -31,6 +32,7 @@ DEFAULT_CONFIG = {
         "single-item-list":        {"enabled": True},
         "mixed-fonts":             {"enabled": True},
         "multiline-heading":       {"enabled": True},
+        "numbered-heading-continuity": {"enabled": True},
     }
 }
 
@@ -263,6 +265,42 @@ def fix_multiline_headings(doc, cfg, applied):
         applied.append(f"I011: Split {count} multiline heading paragraph(s) at line breaks")
 
 
+def fix_numbered_headings(doc, cfg, applied):
+    """W012 — Renumber headings where manual numbering restarts mid-document at the same level."""
+    if not rule_enabled(cfg, 'numbered-heading-continuity'):
+        return
+    numbered_pat = re.compile(r'^(\d+)\.\s')
+    counters = {}  # hlevel -> current sequential count
+    count = 0
+    for para in doc.paragraphs:
+        style = para.style.name
+        hlevel = None
+        for i in range(1, 7):
+            if f'Heading {i}' in style:
+                hlevel = i
+                break
+        if hlevel is None:
+            continue
+        # Reset sub-level counters when a higher heading is encountered
+        for k in list(counters.keys()):
+            if k > hlevel:
+                del counters[k]
+        m = numbered_pat.match(para.text.strip())
+        if not m:
+            continue
+        original_num = int(m.group(1))
+        expected_num = counters.get(hlevel, 0) + 1
+        counters[hlevel] = expected_num
+        if original_num != expected_num:
+            old_prefix = f"{original_num}. "
+            new_prefix = f"{expected_num}. "
+            if para.runs and para.runs[0].text.startswith(old_prefix):
+                para.runs[0].text = new_prefix + para.runs[0].text[len(old_prefix):]
+                count += 1
+    if count:
+        applied.append(f"W012: Renumbered {count} heading(s) to restore sequential continuity")
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -290,6 +328,7 @@ def main():
     fix_heading_level_skip(doc, cfg, applied)
     fix_single_item_lists(doc, cfg, applied)
     fix_multiline_headings(doc, cfg, applied)
+    fix_numbered_headings(doc, cfg, applied)
 
     out = path if args.overwrite else path.with_suffix('').with_suffix('').parent / (path.stem + '.fixed.docx')
     doc.save(str(out))
