@@ -1,0 +1,9 @@
+{
+  "name": "doc-lint",
+  "version": "0.1.0",
+  "description": "Lint and auto-fix formatting in .docx files. Detects and corrects heading misuse, font inconsistencies, list formatting problems, style violations, and structural issues — like ESLint, but for Word documents.",
+  "author": {
+    "name": "dboneku",
+    "url": "https://github.com/dboneku/doc-lint"
+  }
+}
