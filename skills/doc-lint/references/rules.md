@@ -20,6 +20,8 @@ All rules, their codes, default severity, auto-fix status, and configuration opt
 | I010 | mixed-fonts | info | Yes |
 | I011 | multiline-heading | info | Yes |
 | W012 | numbered-heading-continuity | warning | Yes |
+| W013 | template-compliance | warning | No — requires adding content |
+| W014 | naming-convention | warning | No — requires renaming the file |
 
 ---
 
@@ -194,6 +196,82 @@ All rules, their codes, default severity, auto-fix status, and configuration opt
 **Configuration:**
 ```json
 "mixed-fonts": { "severity": "info", "allowed-count": 1 }
+```
+
+---
+
+## W012 — Numbered Heading Continuity
+
+**Description:** Headings use manual numbering in their text (e.g. "1. Purpose", "2. Scope") but the sequence restarts at 1 mid-document at the same heading level.
+
+**Why it matters:** Manual heading numbers that reset mid-document confuse readers and indicate copy-paste errors or incomplete reorganization. Continuous numbering is required for regulatory documents (policies, procedures, ISO 27001 controls).
+
+**Detection:** A document uses manual numbered headings if ≥ 2 headings at any level begin with an Arabic numeral pattern (`^\d+\.`, `^\d+\.\d+`, etc.). Walk all headings at each level in document order; flag any heading where the number ≤ the previous number at the same level.
+
+**Exception:** Hierarchical sub-numbering that resets per parent (e.g. 1.1, 1.2 under section 1, then 2.1, 2.2 under section 2) is correct and must NOT be flagged.
+
+**Auto-fix:** Yes — replace the leading number with the correct sequential value. Preserve everything after the number. If the pattern is ambiguous, flag for review rather than auto-fixing.
+
+**Configuration:**
+```json
+"numbered-heading-continuity": { "enabled": true }
+```
+
+---
+
+## W013 — Template Compliance
+
+**Description:** The document is missing one or more required sections for its detected template type (Policy, Procedure, Form, etc.).
+
+**Why it matters:** Regulatory templates require specific sections to be compliant. Missing sections indicate incomplete documents that should not be published.
+
+**Detection:** Auto-detect the document's template from keyword scoring across all paragraph text. Compare headings found in the document against the required sections list for that template. Flag any required section that has no heading matching its name (case-insensitive, partial match allowed).
+
+**Required sections by template:**
+
+| Template | Required sections |
+|---|---|
+| Policy | Purpose, Scope, Policy Statement, Compliance, Revision History |
+| Procedure | Purpose, Scope, Prerequisites, Procedure Steps, Revision History |
+| Workflow | Purpose, Trigger, Flow Steps, Outcomes |
+| Form | Instructions, Fields, Submission Guidance |
+| Checklist | Instructions, Checklist Items |
+| Meeting Minutes | Attendees, Agenda, Action Items |
+| ISO 27001 | Purpose, Scope, Policy Statement, Control Mapping, Revision History |
+| General | No required sections |
+
+**Auto-fix:** No — missing sections require the user to write content.
+
+**Configuration:**
+```json
+"template-compliance": { "enabled": true }
+```
+
+---
+
+## W014 — Naming Convention
+
+**Description:** The filename does not follow the expected naming pattern for the document's detected template.
+
+**Why it matters:** Consistent naming makes document libraries searchable and allows automated processing to correctly identify document type without opening each file.
+
+**Expected patterns:**
+
+| Template | Pattern | Example |
+|---|---|---|
+| Policy | `ORG-POL-NNN Title` | `ACME-POL-001 Information Security Policy` |
+| Procedure | `ORG-PRO-NNN Title` | `ACME-PRO-003 Onboarding Procedure` |
+| Workflow | `ORG-WF-NNN Title` | `ACME-WF-002 Approval Workflow` |
+| Form | `ORG-FRM-NNN Title` | `ACME-FRM-005 Access Request Form` |
+| Checklist | `ORG-CHK-NNN Title` | `ACME-CHK-001 New Hire Checklist` |
+| Meeting Minutes | `YYYY-MM-DD Team Meeting Minutes` | `2026-03-11 Security Team Meeting Minutes` |
+| ISO 27001 | `ORG-NNN-DOMAIN Title (Type)` | `ACME-001-SEC Data Classification Policy (ISO 27001)` |
+
+**Auto-fix:** No — requires renaming the file.
+
+**Configuration:**
+```json
+"naming-convention": { "enabled": true }
 ```
 
 ---

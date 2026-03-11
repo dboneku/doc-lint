@@ -221,5 +221,54 @@ def split_at_breaks(doc):
 | E001 Consecutive headings | Requires deciding between adding content or converting to bullet list |
 | E002 Empty section | Requires adding content |
 | I009 Orphaned bold | Requires deciding whether to promote to heading or keep as emphasis |
+| W013 Template compliance | Requires writing the missing section content |
+| W014 Naming convention | Requires renaming the file |
 
 These are always flagged in the report but left for the user to resolve manually.
+
+---
+
+## W012 — Numbered Heading Continuity Fix
+
+Renumber headings at each level so manual numbers are continuous:
+
+```python
+import re
+
+def fix_numbered_headings(doc, cfg, applied):
+    if not cfg.get("numbered-heading-continuity", {}).get("enabled", True):
+        return
+    HEADING_STYLES = {f"Heading {i}" for i in range(1, 7)}
+    NUM_PAT = re.compile(r'^(\d+)\.\s')
+    # Collect headings grouped by level
+    level_counter = {}   # level -> current expected number
+    level_parent  = {}   # level -> text of current parent heading
+    fixed = 0
+    for para in doc.paragraphs:
+        if para.style.name not in HEADING_STYLES:
+            # Reset sub-level tracking when non-heading appears
+            continue
+        level = int(para.style.name.split()[-1])
+        text  = para.text.strip()
+        m = NUM_PAT.match(text)
+        if not m:
+            continue
+        found_num = int(m.group(1))
+        expected  = level_counter.get(level, 0) + 1
+        # Reset counters for levels deeper than this one
+        for deeper in list(level_counter.keys()):
+            if deeper > level:
+                del level_counter[deeper]
+        if found_num != expected:
+            # Rewrite the first run
+            new_prefix = f"{expected}. "
+            old_prefix = m.group(0)
+            for run in para.runs:
+                if old_prefix in run.text:
+                    run.text = run.text.replace(old_prefix, new_prefix, 1)
+                    fixed += 1
+                    break
+        level_counter[level] = expected
+    if fixed:
+        applied.append(f"W012: Renumbered {fixed} heading(s) for continuity")
+```

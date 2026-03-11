@@ -17,6 +17,9 @@ ESLint for Word documents. Analyzes `.docx` files for formatting and structural 
 | I009 | Entire short paragraph is bold (possible heading) | No |
 | I010 | Mixed fonts in body text | Yes |
 | I011 | Section title and body text in same paragraph (soft line break) | Yes |
+| W012 | Numbered heading continuity (manual numbers restart mid-document) | Yes |
+| W013 | Template compliance (required sections missing for detected template) | No — requires adding content |
+| W014 | Naming convention (filename doesn't match template naming pattern) | No — requires renaming the file |
 
 ## Installation
 
@@ -70,7 +73,10 @@ Create a `.doc-lint.json` in your project to customize rules:
     },
     "list-normalization": { "enabled": true },
     "single-item-list": { "severity": "info" },
-    "orphaned-bold": { "enabled": false }
+    "orphaned-bold": { "enabled": false },
+    "numbered-heading-continuity": { "enabled": true },
+    "template-compliance": { "enabled": true },
+    "naming-convention": { "enabled": true }
   }
 }
 ```

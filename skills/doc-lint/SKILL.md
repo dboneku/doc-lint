@@ -56,16 +56,19 @@ Always print the full report before asking about fixes:
 doc-lint: HR-Policy.docx
 ══════════════════════════════════════════════════════
   ✖  [E001] Consecutive headings: 5 in a row at lines 12–16 (no body content)
-  ⚠  [W002] Style misuse: 14 paragraphs use "Heading 1" style at 11pt (body size)
-  ⚠  [W003] Mixed fonts: 3 font families in body text (Calibri, Times New Roman, Arial)
-  ⚠  [W004] Non-standard list: Roman numeral ordered list (lines 34–38)
-  ℹ  [I005] Single-item list at line 42 — consider converting to a paragraph
+  ⚠  [W003] Style misuse: 14 paragraphs use "Heading 1" style at 11pt (body size)
+  ℹ  [I010] Mixed fonts: 3 font families in body text (Calibri, Times New Roman, Arial)
+  ⚠  [W006] Non-standard list: Roman numeral ordered list (lines 34–38)
+  ℹ  [I008] Single-item list at line 42 — consider converting to a paragraph
+  ⚠  [W012] Numbered heading continuity: heading "1. Overview" at line 51 restarts sequence (expected 4)
+  ⚠  [W013] Template compliance (Policy): missing required sections — Compliance, Revision History
+  ⚠  [W014] Naming convention: "HR-Policy.docx" does not match Policy pattern (e.g. ACME-POL-001 HR Policy)
 ──────────────────────────────────────────────────────
-  5 issues  (1 error, 3 warnings, 1 info)
-  Auto-fixable: 4 of 5
-  Manual fix required: E001 (consecutive headings — needs content or restructuring)
+  8 issues  (1 error, 5 warnings, 2 info)
+  Auto-fixable: 5 of 8
+  Manual fix required: E001 (consecutive headings), W013 (add missing sections), W014 (rename file)
 ══════════════════════════════════════════════════════
-Run /doc-lint:fix to apply 4 auto-fixes and save HR-Policy.fixed.docx
+Run /doc-lint:fix to apply 5 auto-fixes and save HR-Policy.fixed.docx
 ```
 
 ---
@@ -126,7 +129,10 @@ Users can create `.doc-lint.json` in their project to customize rules:
     },
     "list-normalization": { "enabled": true },
     "single-item-list": { "severity": "info" },
-    "orphaned-bold": { "severity": "info" }
+    "orphaned-bold": { "severity": "info" },
+    "numbered-heading-continuity": { "enabled": true },
+    "template-compliance": { "enabled": true },
+    "naming-convention": { "enabled": true }
   }
 }
 ```
