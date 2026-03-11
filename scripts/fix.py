@@ -54,6 +54,12 @@ def get_para_size(para):
     for run in para.runs:
         if run.font.size:
             return run.font.size.pt
+    try:
+        sz = para.style.font.size
+        if sz:
+            return sz.pt
+    except Exception:
+        pass
     return None
 
 
