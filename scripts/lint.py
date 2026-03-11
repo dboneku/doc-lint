@@ -165,13 +165,27 @@ def _extract_required_headings_from_policy(policy_text: str) -> list:
 
 
 def load_config(config_path):
+    """Load config, merging user overrides on top of defaults.
+
+    A rule value can be:
+      - A dict:  {"enabled": true, "severity": "warning", ...extra...}
+      - A string shorthand: "off" | "error" | "warning" | "info"
+        "off" disables the rule; anything else sets enabled=True + severity.
+    """
     cfg = json.loads(json.dumps(DEFAULT_CONFIG))  # deep copy
     if config_path and Path(config_path).exists():
         with open(config_path) as f:
             user = json.load(f)
         for rule, settings in user.get("rules", {}).items():
-            if rule in cfg["rules"]:
-                cfg["rules"][rule].update(settings)
+            if isinstance(settings, str):
+                if settings == "off":
+                    cfg["rules"].setdefault(rule, {})["enabled"] = False
+                else:
+                    cfg["rules"].setdefault(rule, {}).update(
+                        {"enabled": True, "severity": settings}
+                    )
+            elif isinstance(settings, dict):
+                cfg["rules"].setdefault(rule, {}).update(settings)
     return cfg
 
 
@@ -560,10 +574,48 @@ def print_report(path, issues, as_json=False):
 
 def main():
     parser = argparse.ArgumentParser(description="Lint a .docx file for formatting issues")
-    parser.add_argument("--file",   required=True, help="Path to .docx file")
-    parser.add_argument("--config", default=".doc-lint.json", help="Config file path")
-    parser.add_argument("--json",   action="store_true", help="Output JSON instead of human-readable")
+    parser.add_argument("--file",        required=False, help="Path to .docx file")
+    parser.add_argument("--config",      default=".doc-lint.json", help="Config file path")
+    parser.add_argument("--json",        action="store_true", help="Output JSON instead of human-readable")
+    parser.add_argument("--init-config", action="store_true",
+                        help="Write a template .doc-lint.json to the current directory and exit")
     args = parser.parse_args()
+
+    if args.init_config:
+        dest = Path(".doc-lint.json")
+        if dest.exists():
+            print(f"ERROR: {dest} already exists. Remove it first if you want to regenerate.")
+            sys.exit(1)
+        template = {
+            "rules": {
+                "consecutive-headings":        {"enabled": True,  "severity": "error"},
+                "empty-section":               {"enabled": True,  "severity": "error"},
+                "style-misuse":                {"enabled": True,  "severity": "warning"},
+                "font-normalization":          {"enabled": True,  "severity": "warning", "target-font": "Calibri"},
+                "font-size-normalization":     {"enabled": True,  "severity": "warning",
+                                                "sizes": {"h1": 20, "h2": 16, "h3": 14, "h4": 12, "body": 11}},
+                "list-normalization":          {"enabled": True,  "severity": "warning"},
+                "heading-level-skip":          {"enabled": True,  "severity": "warning"},
+                "single-item-list":            {"enabled": True,  "severity": "info"},
+                "orphaned-bold":               {"enabled": True,  "severity": "info"},
+                "mixed-fonts":                 {"enabled": True,  "severity": "info"},
+                "multiline-heading":           {"enabled": True,  "severity": "info"},
+                "numbered-heading-continuity": {"enabled": True,  "severity": "warning"},
+                "template-compliance":         {"enabled": True,  "severity": "warning"},
+                "naming-convention":           {"enabled": True,  "severity": "warning"},
+                "style-policy":                {"enabled": True,  "severity": "warning"},
+            }
+        }
+        with open(dest, 'w') as f:
+            json.dump(template, f, indent=2)
+            f.write('\n')
+        print(f"Created {dest} — edit rules as needed.")
+        print("  Set a rule to \"off\" to disable it, or \"error\"/\"warning\"/\"info\" to change severity.")
+        print("  Example: \"mixed-fonts\": \"off\"")
+        return
+
+    if not args.file:
+        parser.error("--file is required unless --init-config is used")
 
     path = Path(args.file)
     if not path.exists():
