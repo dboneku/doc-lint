@@ -43,6 +43,12 @@ DEFAULT_CONFIG = {
         "template-compliance": {"enabled": True, "severity": "warning"},
         "naming-convention":   {"enabled": True, "severity": "warning"},
         "style-policy":        {"enabled": True, "severity": "warning"},
+        "excess-blank-paragraphs": {"enabled": True, "severity": "warning"},
+        "placeholder-text":    {"enabled": True, "severity": "error"},
+        "track-changes":       {"enabled": True, "severity": "error"},
+        "double-spaces":       {"enabled": True, "severity": "warning"},
+        "heading-capitalization": {"enabled": True, "severity": "warning", "style": "title"},
+        "raw-urls":            {"enabled": True, "severity": "warning"},
     }
 }
 
@@ -51,7 +57,8 @@ SEVERITY_SYMBOL = {"error": "✖", "warning": "⚠", "info": "ℹ"}
 AUTO_FIXABLE = {
     "style-misuse", "font-normalization", "font-size-normalization",
     "list-normalization", "heading-level-skip", "single-item-list",
-    "mixed-fonts", "multiline-heading", "numbered-heading-continuity"
+    "mixed-fonts", "multiline-heading", "numbered-heading-continuity",
+    "excess-blank-paragraphs", "double-spaces", "heading-capitalization", "raw-urls",
 }
 
 
@@ -527,6 +534,154 @@ def lint(path, cfg):
                             "line": None, "text": "", "fixable": False,
                         })
 
+    # --- W016 Excess blank paragraphs ---
+    if rule_enabled(cfg, 'excess-blank-paragraphs'):
+        blank_run = 0
+        run_start = 0
+        for idx, para in enumerate(doc.paragraphs):
+            if not para.text.strip():
+                blank_run += 1
+                if blank_run == 1:
+                    run_start = idx
+            else:
+                if blank_run > 1:
+                    issues.append({
+                        "rule": "excess-blank-paragraphs", "code": "W016",
+                        "severity": rule_severity(cfg, 'excess-blank-paragraphs'),
+                        "message": (
+                            f"{blank_run} consecutive blank paragraphs at paragraph "
+                            f"{run_start + 1} (max 1 allowed)"
+                        ),
+                        "line": run_start + 1, "text": "", "fixable": True,
+                    })
+                blank_run = 0
+        if blank_run > 1:
+            issues.append({
+                "rule": "excess-blank-paragraphs", "code": "W016",
+                "severity": rule_severity(cfg, 'excess-blank-paragraphs'),
+                "message": (
+                    f"{blank_run} consecutive blank paragraphs at paragraph "
+                    f"{run_start + 1} (max 1 allowed)"
+                ),
+                "line": run_start + 1, "text": "", "fixable": True,
+            })
+
+    # --- E017 Placeholder text ---
+    if rule_enabled(cfg, 'placeholder-text'):
+        _ph_re = re.compile(
+            r'\b(TODO|TBD|PLACEHOLDER)\b|\[INSERT|\[DRAFT\]'
+            r'|Lorem\s+ipsum|<<[^>]+>>',
+            re.IGNORECASE
+        )
+        current_section = "(preamble)"
+        sections_flagged: list[str] = []
+        for idx, para in enumerate(doc.paragraphs):
+            lvl = heading_style_level(para.style.name)
+            if lvl is not None:
+                current_section = para.text.strip()
+            elif _ph_re.search(para.text):
+                snippet = para.text.strip()[:80]
+                issues.append({
+                    "rule": "placeholder-text", "code": "E017",
+                    "severity": rule_severity(cfg, 'placeholder-text'),
+                    "message": f'Placeholder text in section "{current_section}": "{snippet}"',
+                    "line": idx + 1, "text": para.text.strip(), "fixable": False,
+                })
+                if current_section not in sections_flagged:
+                    sections_flagged.append(current_section)
+        if sections_flagged:
+            issues.append({
+                "rule": "placeholder-text", "code": "E017",
+                "severity": rule_severity(cfg, 'placeholder-text'),
+                "message": f'Sections requiring completion: {", ".join(sections_flagged)}',
+                "line": None, "text": "", "fixable": False,
+            })
+
+    # --- E018 Track changes remaining ---
+    if rule_enabled(cfg, 'track-changes'):
+        ins_count = len(doc.element.body.findall('.//' + qn('w:ins')))
+        del_count = len(doc.element.body.findall('.//' + qn('w:del')))
+        if ins_count or del_count:
+            issues.append({
+                "rule": "track-changes", "code": "E018",
+                "severity": rule_severity(cfg, 'track-changes'),
+                "message": (
+                    f"Unaccepted tracked changes: {ins_count} insertion(s), "
+                    f"{del_count} deletion(s) — accept or reject all changes before publishing"
+                ),
+                "line": None, "text": "", "fixable": False,
+            })
+
+    # --- W019 Double spaces ---
+    if rule_enabled(cfg, 'double-spaces'):
+        _ds_re = re.compile(r'  +')
+        for idx, para in enumerate(doc.paragraphs):
+            if _ds_re.search(para.text):
+                issues.append({
+                    "rule": "double-spaces", "code": "W019",
+                    "severity": rule_severity(cfg, 'double-spaces'),
+                    "message": f'Double space in paragraph {idx + 1}: "{para.text.strip()[:60]}"',
+                    "line": idx + 1, "text": para.text.strip(), "fixable": True,
+                })
+
+    # --- W020 Heading capitalization ---
+    if rule_enabled(cfg, 'heading-capitalization'):
+        _hcap_rule = cfg.get('rules', {}).get('heading-capitalization', {})
+        _cap_target = (
+            _hcap_rule.get('style', 'title') if isinstance(_hcap_rule, dict) else 'title'
+        )
+        _tc_skip = {
+            'a', 'an', 'the', 'and', 'but', 'or', 'for', 'nor',
+            'on', 'at', 'to', 'by', 'in', 'of', 'up', 'as', 'is', 'vs',
+        }
+
+        def _is_title_case(text: str) -> bool:
+            for i, token in enumerate(re.split(r'(\s+)', text)):
+                if not token.strip():
+                    continue
+                bare = token.strip('("\')\':,.!?-')
+                if not bare:
+                    continue
+                if i == 0 or bare.lower() not in _tc_skip:
+                    if bare[0].islower():
+                        return False
+            return True
+
+        for idx, para in enumerate(doc.paragraphs):
+            if heading_style_level(para.style.name) is None:
+                continue
+            text = para.text.strip()
+            if not text:
+                continue
+            ok = _is_title_case(text) if _cap_target == 'title' else text[0].isupper()
+            if not ok:
+                issues.append({
+                    "rule": "heading-capitalization", "code": "W020",
+                    "severity": rule_severity(cfg, 'heading-capitalization'),
+                    "message": f'Heading not in {_cap_target} case: "{text}"',
+                    "line": idx + 1, "text": text, "fixable": True,
+                })
+
+    # --- W021 Raw unlinked URLs ---
+    if rule_enabled(cfg, 'raw-urls'):
+        _url_re = re.compile(r'https?://\S+')
+        for idx, para in enumerate(doc.paragraphs):
+            # Collect text already covered by hyperlink elements
+            linked_texts: set[str] = set()
+            for hl in para._p.findall('.//' + qn('w:hyperlink')):
+                hl_text = ''.join(t.text or '' for t in hl.findall('.//' + qn('w:t')))
+                if hl_text:
+                    linked_texts.add(hl_text)
+            for m in _url_re.finditer(para.text):
+                url = m.group(0).rstrip('.,;)>')
+                if url not in linked_texts:
+                    issues.append({
+                        "rule": "raw-urls", "code": "W021",
+                        "severity": rule_severity(cfg, 'raw-urls'),
+                        "message": f'Raw unlinked URL in paragraph {idx + 1}: "{url}"',
+                        "line": idx + 1, "text": url, "fixable": True,
+                    })
+
     issues.sort(key=lambda x: SEVERITY_ORDER.get(x["severity"], 9))
     return issues
 
@@ -604,6 +759,12 @@ def main():
                 "template-compliance":         {"enabled": True,  "severity": "warning"},
                 "naming-convention":           {"enabled": True,  "severity": "warning"},
                 "style-policy":                {"enabled": True,  "severity": "warning"},
+                "excess-blank-paragraphs":     {"enabled": True,  "severity": "warning"},
+                "placeholder-text":            {"enabled": True,  "severity": "error"},
+                "track-changes":               {"enabled": True,  "severity": "error"},
+                "double-spaces":               {"enabled": True,  "severity": "warning"},
+                "heading-capitalization":      {"enabled": True,  "severity": "warning", "style": "title"},
+                "raw-urls":                    {"enabled": True,  "severity": "warning"},
             }
         }
         with open(dest, 'w') as f:

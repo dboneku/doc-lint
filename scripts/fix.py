@@ -16,6 +16,7 @@ try:
     from docx.oxml.ns import qn
     from docx.oxml import OxmlElement
     from docx.shared import Pt
+    from docx.opc.constants import RELATIONSHIP_TYPE as RT
 except ImportError:
     print("ERROR: python-docx not installed. Run: pip install python-docx")
     sys.exit(1)
@@ -33,6 +34,10 @@ DEFAULT_CONFIG = {
         "mixed-fonts":             {"enabled": True},
         "multiline-heading":       {"enabled": True},
         "numbered-heading-continuity": {"enabled": True},
+        "excess-blank-paragraphs": {"enabled": True},
+        "double-spaces":           {"enabled": True},
+        "heading-capitalization":  {"enabled": True, "style": "title"},
+        "raw-urls":                {"enabled": True},
     }
 }
 
@@ -55,6 +60,12 @@ _CONFIG_TEMPLATE = {
         "template-compliance":         {"enabled": True,  "severity": "warning"},
         "naming-convention":           {"enabled": True,  "severity": "warning"},
         "style-policy":                {"enabled": True,  "severity": "warning"},
+        "excess-blank-paragraphs":     {"enabled": True,  "severity": "warning"},
+        "placeholder-text":            {"enabled": True,  "severity": "error"},
+        "track-changes":               {"enabled": True,  "severity": "error"},
+        "double-spaces":               {"enabled": True,  "severity": "warning"},
+        "heading-capitalization":      {"enabled": True,  "severity": "warning", "style": "title"},
+        "raw-urls":                    {"enabled": True,  "severity": "warning"},
     }
 }
 
@@ -349,6 +360,176 @@ def fix_numbered_headings(doc, cfg, applied, changes):
 
 
 # ---------------------------------------------------------------------------
+# W016 / W019 / W020 / W021 fix functions
+# ---------------------------------------------------------------------------
+
+def fix_excess_blank_paragraphs(doc, cfg, applied, changes):
+    """W016: Remove extra consecutive blank paragraphs (keep at most 1)."""
+    if not rule_enabled(cfg, 'excess-blank-paragraphs'):
+        return
+    to_remove = []
+    blank_run: list = []
+    for para in doc.paragraphs:
+        if not para.text.strip():
+            blank_run.append(para)
+        else:
+            if len(blank_run) > 1:
+                to_remove.extend(blank_run[1:])
+            blank_run = []
+    if len(blank_run) > 1:
+        to_remove.extend(blank_run[1:])
+    for para in to_remove:
+        p = para._element
+        p.getparent().remove(p)
+    if to_remove:
+        n = len(to_remove)
+        changes.append(('W016', f'{n} excess blank paragraph(s)', 'removed'))
+        applied.append(f'W016: removed {n} excess blank paragraph(s)')
+
+
+def fix_double_spaces(doc, cfg, applied, changes):
+    """W019: Collapse multiple consecutive spaces to a single space."""
+    if not rule_enabled(cfg, 'double-spaces'):
+        return
+    _ds = re.compile(r'  +')
+    count = 0
+    for para in doc.paragraphs:
+        for run in para.runs:
+            if _ds.search(run.text):
+                before = run.text
+                run.text = _ds.sub(' ', run.text)
+                changes.append(('W019', before[:60], run.text[:60]))
+                count += 1
+    if count:
+        applied.append(f'W019: collapsed double spaces in {count} run(s)')
+
+
+_TC_SKIP = frozenset({
+    'a', 'an', 'the', 'and', 'but', 'or', 'for', 'nor',
+    'on', 'at', 'to', 'by', 'in', 'of', 'up', 'as', 'is', 'vs',
+})
+
+
+def _to_title_case(text: str) -> str:
+    """Title-case *text*, preserving exact run lengths (only case changes, no reflow)."""
+    parts = re.split(r'(\s+)', text)
+    word_idx = 0
+    out = []
+    for part in parts:
+        if not part.strip():
+            out.append(part)
+            continue
+        bare = part.strip('("\')\':,.!?-')
+        if word_idx == 0 or bare.lower() not in _TC_SKIP:
+            chars = list(part)
+            for i, ch in enumerate(chars):
+                if ch.isalpha():
+                    chars[i] = ch.upper()
+                    break
+            out.append(''.join(chars))
+        else:
+            out.append(part.lower())
+        word_idx += 1
+    return ''.join(out)
+
+
+def fix_heading_capitalization(doc, cfg, applied, changes):
+    """W020: Convert headings to Title Case (or configured style)."""
+    rule = cfg.get('rules', {}).get('heading-capitalization', {})
+    if isinstance(rule, dict):
+        if not rule.get('enabled', True):
+            return
+        target = rule.get('style', 'title')
+    else:
+        return  # string shorthand means no extra options — default to title
+    if target != 'title':
+        return  # only Title Case auto-fix is supported
+
+    def _is_title_case(text: str) -> bool:
+        for token in re.split(r'(\s+)', text):
+            if not token.strip():
+                continue
+            bare = token.strip('("\')\':,.!?-')
+            if not bare:
+                continue
+            if bare.lower() not in _TC_SKIP:
+                if bare[0].islower():
+                    return False
+        return True
+
+    count = 0
+    for para in doc.paragraphs:
+        style_name = para.style.name
+        if not (style_name.startswith('Heading') or 'heading' in style_name.lower()):
+            continue
+        full_text = para.text
+        if not full_text.strip() or _is_title_case(full_text.strip()):
+            continue
+        new_full = _to_title_case(full_text)
+        if new_full == full_text:
+            continue
+        # Apply by slicing new_full across runs (lengths preserved)
+        pos = 0
+        for run in para.runs:
+            n = len(run.text)
+            run.text = new_full[pos:pos + n]
+            pos += n
+        changes.append(('W020', full_text.strip()[:60], new_full.strip()[:60]))
+        count += 1
+    if count:
+        applied.append(f'W020: converted {count} heading(s) to title case')
+
+
+def fix_raw_urls(doc, cfg, applied, changes):
+    """W021: Convert raw plain-text URLs into Word hyperlinks."""
+    if not rule_enabled(cfg, 'raw-urls'):
+        return
+    _url_re = re.compile(r'https?://\S+')
+    count = 0
+    for para in doc.paragraphs:
+        # Collect URLs already in hyperlinks
+        linked: set[str] = set()
+        for hl in para._p.findall('.//' + qn('w:hyperlink')):
+            hl_text = ''.join(t.text or '' for t in hl.findall('.//' + qn('w:t')))
+            if hl_text:
+                linked.add(hl_text)
+        for run in list(para.runs):
+            m = _url_re.search(run.text)
+            if not m:
+                continue
+            url = m.group(0).rstrip('.,;)>')
+            if url in linked:
+                continue
+            # Add a relationship and build a <w:hyperlink> element
+            rId = doc.part.relate_to(url, RT.HYPERLINK, is_external=True)
+            hyperlink = OxmlElement('w:hyperlink')
+            hyperlink.set(
+                '{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id',
+                rId,
+            )
+            new_run = OxmlElement('w:r')
+            rPr = OxmlElement('w:rPr')
+            rStyle = OxmlElement('w:rStyle')
+            rStyle.set(qn('w:val'), 'Hyperlink')
+            rPr.append(rStyle)
+            new_run.append(rPr)
+            t_el = OxmlElement('w:t')
+            t_el.text = url
+            new_run.append(t_el)
+            hyperlink.append(new_run)
+            run._r.addprevious(hyperlink)
+            # Remove the URL text from the original run (keep any surrounding text)
+            run.text = run.text[:m.start()] + run.text[m.start() + len(m.group(0)):]
+            if not run.text:
+                run._r.getparent().remove(run._r)
+            linked.add(url)
+            changes.append(('W021', url, f'[hyperlink: {url}]'))
+            count += 1
+    if count:
+        applied.append(f'W021: converted {count} raw URL(s) to hyperlinks')
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -394,6 +575,10 @@ def main():
     fix_single_item_lists(doc, cfg, applied, changes)
     fix_multiline_headings(doc, cfg, applied, changes)
     fix_numbered_headings(doc, cfg, applied, changes)
+    fix_excess_blank_paragraphs(doc, cfg, applied, changes)
+    fix_double_spaces(doc, cfg, applied, changes)
+    fix_heading_capitalization(doc, cfg, applied, changes)
+    fix_raw_urls(doc, cfg, applied, changes)
 
     out = path if args.overwrite else path.with_suffix('').parent / (path.stem + '.fixed.docx')
     doc.save(str(out))
