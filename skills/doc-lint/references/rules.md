@@ -19,6 +19,7 @@ All rules, their codes, default severity, auto-fix status, and configuration opt
 | I009 | orphaned-bold | info | No — requires judgment |
 | I010 | mixed-fonts | info | Yes |
 | I011 | multiline-heading | info | Yes |
+| W012 | numbered-heading-continuity | warning | Yes |
 
 ---
 
@@ -208,6 +209,34 @@ All rules, their codes, default severity, auto-fix status, and configuration opt
 **Configuration:**
 ```json
 "multiline-heading": { "severity": "info" }
+```
+
+---
+
+## W012 — Numbered Heading Continuity
+
+**Description:** Headings at the same level use manual Arabic numbering (e.g. "1. Purpose", "2. Scope") but the sequence resets mid-document instead of continuing.
+
+**Why it matters:** Restarting the count mid-document (e.g. "3. Policy" followed later by "1. Compliance") makes the document harder to navigate and breaks references like "see section 4".
+
+**Detection:** Scan heading text for a leading number pattern (`^\d+\.` or `^\d+\.\d+`). For each heading level that uses numbering, track the expected next value. Flag any heading where the number is ≤ the previous number at the same level.
+
+**Exception:** Hierarchical sub-numbering that resets per parent (1.1, 1.2 → 2.1, 2.2) is correct — only flag flat restarts at the same level.
+
+**Example (flagged):**
+```
+H2: 1. Introduction
+H2: 2. Scope
+H2: 3. Policy Statements
+H2: 1. Compliance         ← W012: expected 4, found 1
+H2: 2. Related Documents  ← W012: expected 5, found 2
+```
+
+**Auto-fix:** Yes — replace the leading number in the heading text with the correct sequential value. Preserves everything after the number (title text, punctuation style).
+
+**Configuration:**
+```json
+"numbered-heading-continuity": { "severity": "warning" }
 ```
 
 ---
