@@ -5,6 +5,7 @@ Usage: python lint.py --file path/to/file.docx [--config .doc-lint.json] [--json
 """
 
 import sys
+import os
 import re
 import json
 import argparse
@@ -41,6 +42,7 @@ DEFAULT_CONFIG = {
         "numbered-heading-continuity": {"enabled": True, "severity": "warning"},
         "template-compliance": {"enabled": True, "severity": "warning"},
         "naming-convention":   {"enabled": True, "severity": "warning"},
+        "style-policy":        {"enabled": True, "severity": "warning"},
     }
 }
 
@@ -109,6 +111,58 @@ _NAMING_PATTERNS = {
     'meeting_minutes': (re.compile(r'^\d{4}-\d{2}-\d{2}.+',    re.I), '2026-01-01 Team Meeting Minutes'),
     'iso27001':        (re.compile(r'^[A-Z]+-\d+[\s\-].+',     re.I), 'ORG-001-DOMAIN Title (Type)'),
 }
+
+_STYLE_POLICY_FILE = ".style-policy.md"
+
+
+def _extract_required_headings_from_policy(policy_text: str) -> list:
+    """Parse a style policy text and return detected required section/heading names."""
+    required = []
+    lines = policy_text.splitlines()
+    in_block = False
+
+    _trigger_re = re.compile(
+        r'required.{0,30}section|must include|must contain|required heading'
+        r'|all documents.{0,30}(?:must|shall).{0,30}(?:include|contain|have)',
+        re.IGNORECASE,
+    )
+    _inline_re = re.compile(
+        r'(?:required.{0,30}:|headings[::]|sections[::])\ *(.+)', re.IGNORECASE
+    )
+    _item_re = re.compile(r'^[\s\-\*\u2022\d\.]+(.+)')
+
+    for line in lines:
+        s = line.strip()
+        m = _inline_re.search(s)
+        if m:
+            for part in re.split(r'[,;/]', m.group(1)):
+                name = part.strip(' ."\'')
+                if 2 <= len(name.split()) <= 6:
+                    required.append(name)
+            in_block = False
+            continue
+        if _trigger_re.search(s):
+            in_block = True
+            continue
+        if in_block:
+            if not s:
+                continue
+            mi = _item_re.match(s)
+            if mi:
+                name = mi.group(1).strip(' ."\'')
+                if 1 <= len(name.split()) <= 7:
+                    required.append(name)
+            elif s.startswith('#') or (s and s[0] not in '-*\u202212345679'):
+                in_block = False
+
+    seen = set()
+    deduped = []
+    for item in required:
+        if item not in seen:
+            seen.add(item)
+            deduped.append(item)
+    return deduped
+
 
 def load_config(config_path):
     cfg = json.loads(json.dumps(DEFAULT_CONFIG))  # deep copy
@@ -441,6 +495,34 @@ def lint(path, cfg):
                     ),
                     "line": None, "text": "", "fixable": False
                 })
+
+    # --- W015 Style policy compliance ---
+    if rule_enabled(cfg, 'style-policy'):
+        policy_path = Path(os.getcwd()) / _STYLE_POLICY_FILE
+        if policy_path.exists():
+            raw = policy_path.read_text(encoding='utf-8')
+            # Strip YAML frontmatter if present
+            body = raw
+            if raw.startswith('---'):
+                end = raw.find('\n---', 3)
+                if end != -1:
+                    body = raw[end + 4:].lstrip('\n')
+            required = _extract_required_headings_from_policy(body)
+            if required:
+                heading_texts = {
+                    p.text.lower().strip()
+                    for p in paras
+                    if heading_style_level(p.style.name) is not None
+                }
+                for req in required:
+                    req_lower = req.lower().strip()
+                    if not any(req_lower in h or h in req_lower for h in heading_texts):
+                        issues.append({
+                            "rule": "style-policy", "code": "W015",
+                            "severity": rule_severity(cfg, 'style-policy'),
+                            "message": f'Style policy: missing required section "{req}"',
+                            "line": None, "text": "", "fixable": False,
+                        })
 
     issues.sort(key=lambda x: SEVERITY_ORDER.get(x["severity"], 9))
     return issues
