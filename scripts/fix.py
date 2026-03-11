@@ -266,11 +266,10 @@ def fix_multiline_headings(doc, cfg, applied):
 
 
 def fix_numbered_headings(doc, cfg, applied):
-    """W012 — Renumber headings where manual numbering restarts mid-document at the same level."""
+    """W012 — Strip numeric number prefixes from headings (e.g. '1. Purpose' → 'Purpose')."""
     if not rule_enabled(cfg, 'numbered-heading-continuity'):
         return
-    numbered_pat = re.compile(r'^(\d+)\.\s')
-    counters = {}  # hlevel -> current sequential count
+    numbered_pat = re.compile(r'^\d+\.\s+')
     count = 0
     for para in doc.paragraphs:
         style = para.style.name
@@ -281,24 +280,15 @@ def fix_numbered_headings(doc, cfg, applied):
                 break
         if hlevel is None:
             continue
-        # Reset sub-level counters when a higher heading is encountered
-        for k in list(counters.keys()):
-            if k > hlevel:
-                del counters[k]
         m = numbered_pat.match(para.text.strip())
         if not m:
             continue
-        original_num = int(m.group(1))
-        expected_num = counters.get(hlevel, 0) + 1
-        counters[hlevel] = expected_num
-        if original_num != expected_num:
-            old_prefix = f"{original_num}. "
-            new_prefix = f"{expected_num}. "
-            if para.runs and para.runs[0].text.startswith(old_prefix):
-                para.runs[0].text = new_prefix + para.runs[0].text[len(old_prefix):]
-                count += 1
+        prefix = m.group(0)
+        if para.runs and para.runs[0].text.startswith(prefix):
+            para.runs[0].text = para.runs[0].text[len(prefix):]
+            count += 1
     if count:
-        applied.append(f"W012: Renumbered {count} heading(s) to restore sequential continuity")
+        applied.append(f"W012: Stripped number prefix from {count} heading(s)")
 
 
 # ---------------------------------------------------------------------------

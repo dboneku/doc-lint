@@ -426,34 +426,23 @@ def lint(path, cfg):
             "line": None, "text": "", "fixable": True
         })
 
-    # --- W012 Numbered heading continuity ---
+    # --- W012 Numbered heading prefix ---
     if rule_enabled(cfg, 'numbered-heading-continuity'):
-        numbered_pat = re.compile(r'^(\d+)\.')
-        level_seqs = {}  # hlevel -> [(para_idx, number)]
+        numbered_pat = re.compile(r'^\d+\.')
         for idx, para in enumerate(paras):
             hlevel = heading_style_level(para.style.name)
             if hlevel is None:
                 continue
-            m = numbered_pat.match(para.text.strip())
-            if m:
-                level_seqs.setdefault(hlevel, []).append((idx, int(m.group(1))))
-        for hlevel, seq in level_seqs.items():
-            if len(seq) < 2:
-                continue
-            for i in range(1, len(seq)):
-                prev_num = seq[i - 1][1]
-                curr_num, curr_idx = seq[i][1], seq[i][0]
-                if curr_num <= prev_num and curr_num == 1:
-                    issues.append({
-                        "rule": "numbered-heading-continuity", "code": "W012",
-                        "severity": rule_severity(cfg, 'numbered-heading-continuity'),
-                        "message": (
-                            f'Heading numbering restarts at H{hlevel}: '
-                            f'"{paras[curr_idx].text.strip()[:50]}" '
-                            f'(expected >{prev_num})'
-                        ),
-                        "line": curr_idx + 1, "text": paras[curr_idx].text[:60], "fixable": True
-                    })
+            if numbered_pat.match(para.text.strip()):
+                issues.append({
+                    "rule": "numbered-heading-continuity", "code": "W012",
+                    "severity": rule_severity(cfg, 'numbered-heading-continuity'),
+                    "message": (
+                        f'Heading has numbered prefix (H{hlevel}): '
+                        f'"{para.text.strip()[:60]}" — headings should be plain text'
+                    ),
+                    "line": idx + 1, "text": para.text[:60], "fixable": True
+                })
 
     # --- W013 Template compliance ---
     if rule_enabled(cfg, 'template-compliance'):
