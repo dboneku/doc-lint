@@ -1,7 +1,7 @@
 {
   "name": "doc-lint",
   "version": "0.1.0",
-  "description": "Lint and auto-fix formatting in .docx files. Detects and corrects heading misuse, font inconsistencies, list formatting problems, style violations, and structural issues — like ESLint, but for Word documents.",
+  "description": "Lint and auto-fix formatting in .docx files. Detects and corrects heading misuse, font inconsistencies, list formatting problems, style violations, and structural issues — like ESLint, but for Word documents. Works as a Claude Code CLI plugin (full auto-fix via Python scripts) and as a Claude.ai / coworker skill (structural analysis from uploaded document content).",
   "author": {
     "name": "dboneku",
     "url": "https://github.com/dboneku/doc-lint"
