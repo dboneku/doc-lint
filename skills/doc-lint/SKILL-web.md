@@ -32,8 +32,15 @@ Because this skill reads document content rather than running `lint.py` against 
 | W012 | Numbered heading continuity | ✅ Full — detectable from heading text |
 | W013 | Template compliance | ✅ Full — detectable from section headings |
 | W014 | Naming convention | ✅ Full — detectable from filename |
+| W015 | Style policy | ⚠ Partial — only when `.style-policy.md` is provided in the prompt |
+| W016 | Excess blank paragraphs | ✅ Full — detectable from structure |
+| E017 | Placeholder text | ✅ Full — detectable from content |
+| E018 | Track changes | ✗ Not detectable — requires XML metadata |
+| W019 | Double spaces | ✅ Full — detectable from content |
+| W020 | Heading capitalization | ✅ Full — detectable from heading text |
+| W021 | Raw URLs | ✅ Full — detectable from content |
 
-When a formatting-level rule (W003, W004, W005, W010, I011) cannot be assessed from content alone, tell the user and recommend running the CLI plugin for accurate detection.
+When a formatting-level rule (W003, W004, W005, I010, I011) cannot be assessed from content alone, tell the user and recommend running the CLI plugin for accurate detection.
 
 ---
 
@@ -200,6 +207,68 @@ Check the filename against the expected pattern for the detected template. Patte
 ⚠ [W014] Naming convention: "HR-Policy.docx" does not match Policy pattern
           Expected pattern: ORG-POL-NNN Title  (e.g. ACME-POL-001 HR Policy)
           Fix: rename the file to match the naming convention
+```
+
+### W015 — Style Policy
+
+If the user provides the contents of a `.style-policy.md` file, extract any required section or heading names from it and verify they exist as headings in the document.
+
+```
+⚠ [W015] Style policy: missing required section "Executive Summary"
+          Fix: add an "Executive Summary" heading and content
+```
+
+### W016 — Excess Blank Paragraphs
+
+Flag any location in the document where more than one consecutive blank line appears.
+
+```
+⚠ [W016] Excess blank paragraphs: 3 consecutive blank lines at paragraph 42 (max 1 allowed)
+          Fix: remove the extra blank lines — use paragraph spacing for visual separation
+```
+
+### E017 — Placeholder Text
+
+Scan all paragraph text for placeholder or draft markers: `TODO`, `TBD`, `PLACEHOLDER`, `[INSERT …]`, `[DRAFT]`, `Lorem ipsum`, `<<…>>`.
+
+```
+✖ [E017] Placeholder text in section "Policy Statements": "[INSERT policy content here]"
+          Fix: replace with real content before publishing
+```
+
+### E018 — Track Changes
+
+Tracked changes cannot be detected from document content alone. Skip this rule and note the limitation if relevant.
+
+```
+ℹ [E018] Track changes: cannot be assessed without XML metadata — run the CLI plugin to check
+```
+
+### W019 — Double Spaces
+
+Scan paragraph text for two or more consecutive spaces.
+
+```
+⚠ [W019] Double space in paragraph 12: "The  following  policy applies…"
+          Fix: replace each double space with a single space
+```
+
+### W020 — Heading Capitalization
+
+Check each heading against the configured capitalization style (default: Title Case). Flag headings where the first word or any significant word is not capitalized.
+
+```
+⚠ [W020] Heading not in title case: "information security overview" at line 8
+          Fix: capitalize to "Information Security Overview"
+```
+
+### W021 — Raw URLs
+
+Scan paragraph text for plain-text `http://` or `https://` URLs.
+
+```
+⚠ [W021] Raw unlinked URL in paragraph 24: "https://example.com/policy"
+          Fix: in Word, select the URL text and use Insert → Hyperlink to convert it
 ```
 
 ---

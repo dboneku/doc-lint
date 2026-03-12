@@ -159,7 +159,7 @@ def _extract_required_headings_from_policy(policy_text: str) -> list:
                 name = mi.group(1).strip(' ."\'')
                 if 1 <= len(name.split()) <= 7:
                     required.append(name)
-            elif s.startswith('#') or (s and s[0] not in '-*\u202212345679'):
+            elif s.startswith('#') or (s and s[0] not in '-*\u2022123456789'):
                 in_block = False
 
     seen = set()
@@ -447,23 +447,38 @@ def lint(path, cfg):
             "line": None, "text": "", "fixable": True
         })
 
-    # --- W012 Numbered heading prefix ---
+    # --- W012 Numbered heading continuity ---
     if rule_enabled(cfg, 'numbered-heading-continuity'):
-        numbered_pat = re.compile(r'^\d+\.')
+        # Match "N." prefix only; exclude hierarchical sub-numbering like "N.N"
+        numbered_pat = re.compile(r'^(\d+)\.(?!\d)\s*')
+        level_next: dict = {}  # hlevel -> expected next number
         for idx, para in enumerate(paras):
             hlevel = heading_style_level(para.style.name)
             if hlevel is None:
                 continue
-            if numbered_pat.match(para.text.strip()):
+            m = numbered_pat.match(para.text.strip())
+            if not m:
+                # Unnumbered heading: do not modify continuity counters; only numbered
+                # headings affect the expected sequence.
+                continue
+            actual = int(m.group(1))
+            expected = level_next.get(hlevel, 1)
+            if actual != expected:
                 issues.append({
                     "rule": "numbered-heading-continuity", "code": "W012",
                     "severity": rule_severity(cfg, 'numbered-heading-continuity'),
                     "message": (
-                        f'Heading has numbered prefix (H{hlevel}): '
-                        f'"{para.text.strip()[:60]}" — headings should be plain text'
+                        f'Heading number out of sequence (H{hlevel}): '
+                        f'found {actual}, expected {expected}: '
+                        f'"{para.text.strip()[:50]}"'
                     ),
                     "line": idx + 1, "text": para.text[:60], "fixable": True
                 })
+            level_next[hlevel] = expected + 1
+            # Reset child level counters when this heading level appears
+            for lv in list(level_next):
+                if lv > hlevel:
+                    del level_next[lv]
 
     # --- W013 Template compliance ---
     if rule_enabled(cfg, 'template-compliance'):
@@ -636,15 +651,17 @@ def lint(path, cfg):
         }
 
         def _is_title_case(text: str) -> bool:
-            for i, token in enumerate(re.split(r'(\s+)', text)):
+            word_idx = 0
+            for token in re.split(r'(\s+)', text):
                 if not token.strip():
                     continue
                 bare = token.strip('("\')\':,.!?-')
                 if not bare:
                     continue
-                if i == 0 or bare.lower() not in _tc_skip:
+                if word_idx == 0 or bare.lower() not in _tc_skip:
                     if bare[0].islower():
                         return False
+                word_idx += 1
             return True
 
         for idx, para in enumerate(doc.paragraphs):

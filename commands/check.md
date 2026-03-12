@@ -12,7 +12,7 @@ Lint a single .docx file and report all formatting issues. Do not modify any fil
 
 2. Run the linter:
    ```bash
-   python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lint.py" --file "$FILE_PATH"
+   python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lint.py" --file "$FILE_PATH" --json
    ```
 
 3. Parse the JSON output and display a formatted report following the doc-lint skill format:
