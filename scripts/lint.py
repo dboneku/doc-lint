@@ -120,6 +120,32 @@ _NAMING_PATTERNS = {
 }
 
 _STYLE_POLICY_FILE = ".style-policy.md"
+_RAW_URL_RE = re.compile(r'https?://[^\s<>"\]]+')
+
+
+def _warn(message: str):
+    print(f"WARNING: {message}", file=sys.stderr)
+
+
+def _strip_yaml_frontmatter(raw: str) -> str:
+    if not raw.startswith('---'):
+        return raw
+    lines = raw.splitlines()
+    if not lines or lines[0].strip() != '---':
+        return raw
+    for idx, line in enumerate(lines[1:], start=1):
+        if line.strip() == '---':
+            return '\n'.join(lines[idx + 1:]).lstrip('\n')
+    return raw
+
+
+def _clean_detected_url(raw_url: str) -> str:
+    url = raw_url.rstrip('.,;:!?>')
+    while url.endswith(')') and url.count('(') < url.count(')'):
+        url = url[:-1]
+    while url.endswith(']') and url.count('[') < url.count(']'):
+        url = url[:-1]
+    return url
 
 
 def _extract_required_headings_from_policy(policy_text: str) -> list:
@@ -134,7 +160,7 @@ def _extract_required_headings_from_policy(policy_text: str) -> list:
         re.IGNORECASE,
     )
     _inline_re = re.compile(
-        r'(?:required.{0,30}:|headings[::]|sections[::])\ *(.+)', re.IGNORECASE
+        r'(?:required[^:]{0,30}:|headings?:|sections?:)\s*(.+)', re.IGNORECASE
     )
     _item_re = re.compile(r'^[\s\-\*\u2022\d\.]+(.+)')
 
@@ -144,7 +170,7 @@ def _extract_required_headings_from_policy(policy_text: str) -> list:
         if m:
             for part in re.split(r'[,;/]', m.group(1)):
                 name = part.strip(' ."\'')
-                if 2 <= len(name.split()) <= 6:
+                if 1 <= len(name.split()) <= 6:
                     required.append(name)
             in_block = False
             continue
@@ -274,15 +300,13 @@ def lint(path, cfg):
     MONOSPACE = {'Courier New', 'Consolas', 'Monaco', 'Courier', 'Lucida Console'}
     NON_DECIMAL = {'lowerRoman', 'upperRoman', 'lowerLetter', 'upperLetter'}
 
-    paras = [p for p in doc.paragraphs if p.text.strip()]
+    paras = [(idx, p) for idx, p in enumerate(doc.paragraphs) if p.text.strip()]
     body_fonts = set()
     consec_count = 0
     prev_was_heading = False
     current_heading_level = 0
     list_groups = {}   # numid -> list of para indices
-    para_idx = 0
-
-    for idx, para in enumerate(paras):
+    for idx, (orig_idx, para) in enumerate(paras):
         style      = para.style.name
         size       = get_para_size(para)
         pPr        = para._element.find(qn('w:pPr'))
@@ -306,7 +330,7 @@ def lint(path, cfg):
                     "rule": "style-misuse", "code": "W003",
                     "severity": rule_severity(cfg, 'style-misuse'),
                     "message": f'"Heading {hlevel}" style used at {size}pt (body-text size) — reclassify as Normal',
-                    "line": idx + 1, "text": para.text[:60], "fixable": True
+                    "line": orig_idx + 1, "text": para.text[:60], "fixable": True
                 })
                 is_heading = False  # treat as body for further checks
 
@@ -320,7 +344,7 @@ def lint(path, cfg):
                         "rule": "consecutive-headings", "code": "E001",
                         "severity": rule_severity(cfg, 'consecutive-headings'),
                         "message": f'Heading #{consec_count} in a row with no body content: "{para.text[:50]}"',
-                        "line": idx + 1, "text": para.text[:60], "fixable": False
+                        "line": orig_idx + 1, "text": para.text[:60], "fixable": False
                     })
             else:
                 consec_count = 0
@@ -331,7 +355,7 @@ def lint(path, cfg):
                 "rule": "empty-section", "code": "E002",
                 "severity": rule_severity(cfg, 'empty-section'),
                 "message": f'Empty section: heading immediately followed by another heading',
-                "line": idx + 1, "text": para.text[:60], "fixable": False
+                "line": orig_idx + 1, "text": para.text[:60], "fixable": False
             })
 
         # --- W007 Heading level skip ---
@@ -341,7 +365,7 @@ def lint(path, cfg):
                     "rule": "heading-level-skip", "code": "W007",
                     "severity": rule_severity(cfg, 'heading-level-skip'),
                     "message": f'Heading level skip: H{current_heading_level} → H{hlevel} (missing H{current_heading_level + 1})',
-                    "line": idx + 1, "text": para.text[:60], "fixable": True
+                    "line": orig_idx + 1, "text": para.text[:60], "fixable": True
                 })
             if hlevel:
                 current_heading_level = hlevel
@@ -360,12 +384,12 @@ def lint(path, cfg):
                     "rule": "font-size-normalization", "code": "W005",
                     "severity": rule_severity(cfg, 'font-size-normalization'),
                     "message": f'Non-standard size: {size}pt (expected {expected}pt for {style})',
-                    "line": idx + 1, "text": para.text[:60], "fixable": True
+                    "line": orig_idx + 1, "text": para.text[:60], "fixable": True
                 })
 
         # --- I008 Single-item list (group tracking) ---
         if is_list:
-            list_groups.setdefault(numid, []).append(idx)
+            list_groups.setdefault(numid, []).append((orig_idx, para))
 
         # --- I009 Orphaned bold ---
         if rule_enabled(cfg, 'orphaned-bold') and not is_heading and not is_list:
@@ -375,7 +399,7 @@ def lint(path, cfg):
                         "rule": "orphaned-bold", "code": "I009",
                         "severity": rule_severity(cfg, 'orphaned-bold'),
                         "message": f'Fully bold short paragraph — possible heading: "{para.text[:50]}"',
-                        "line": idx + 1, "text": para.text[:60], "fixable": False
+                        "line": orig_idx + 1, "text": para.text[:60], "fixable": False
                     })
 
         # --- I011 Multiline heading ---
@@ -390,7 +414,7 @@ def lint(path, cfg):
                     "rule": "multiline-heading", "code": "I011",
                     "severity": rule_severity(cfg, 'multiline-heading'),
                     "message": f'Multiline heading paragraph — split section title from body text',
-                    "line": idx + 1, "text": para.text[:60], "fixable": True
+                    "line": orig_idx + 1, "text": para.text[:60], "fixable": True
                 })
 
         # --- W004 Font normalization (per-paragraph) ---
@@ -402,7 +426,7 @@ def lint(path, cfg):
                         "rule": "font-normalization", "code": "W004",
                         "severity": rule_severity(cfg, 'font-normalization'),
                         "message": f'Non-standard font: "{run.font.name}" (expected "{target}")',
-                        "line": idx + 1, "text": para.text[:60], "fixable": True
+                        "line": orig_idx + 1, "text": para.text[:60], "fixable": True
                     })
                     break  # one issue per paragraph
 
@@ -410,14 +434,14 @@ def lint(path, cfg):
 
     # --- I008 Single-item list (emit after full scan) ---
     if rule_enabled(cfg, 'single-item-list'):
-        for numid, idxs in list_groups.items():
-            if len(idxs) == 1:
-                para = paras[idxs[0]]
+        for numid, entries in list_groups.items():
+            if len(entries) == 1:
+                orig_idx, para = entries[0]
                 issues.append({
                     "rule": "single-item-list", "code": "I008",
                     "severity": rule_severity(cfg, 'single-item-list'),
                     "message": f'Single-item list — convert to paragraph',
-                    "line": idxs[0] + 1, "text": para.text[:60], "fixable": True
+                    "line": orig_idx + 1, "text": para.text[:60], "fixable": True
                 })
 
     # --- W006 List normalization ---
@@ -435,8 +459,8 @@ def lint(path, cfg):
                             "line": None, "text": "", "fixable": True
                         })
                         break
-        except Exception:
-            pass
+        except Exception as exc:
+            _warn(f"Could not inspect numbering XML for list normalization: {exc}")
 
     # --- I010 Mixed fonts ---
     if rule_enabled(cfg, 'mixed-fonts') and len(body_fonts) > 1:
@@ -452,7 +476,7 @@ def lint(path, cfg):
         # Match "N." prefix only; exclude hierarchical sub-numbering like "N.N"
         numbered_pat = re.compile(r'^(\d+)\.(?!\d)\s*')
         level_next: dict = {}  # hlevel -> expected next number
-        for idx, para in enumerate(paras):
+        for orig_idx, para in paras:
             hlevel = heading_style_level(para.style.name)
             if hlevel is None:
                 continue
@@ -472,7 +496,7 @@ def lint(path, cfg):
                         f'found {actual}, expected {expected}: '
                         f'"{para.text.strip()[:50]}"'
                     ),
-                    "line": idx + 1, "text": para.text[:60], "fixable": True
+                    "line": orig_idx + 1, "text": para.text[:60], "fixable": True
                 })
             level_next[hlevel] = expected + 1
             # Reset child level counters when this heading level appears
@@ -482,13 +506,13 @@ def lint(path, cfg):
 
     # --- W013 Template compliance ---
     if rule_enabled(cfg, 'template-compliance'):
-        full_text = ' '.join(p.text for p in paras)
+        full_text = ' '.join(p.text for _, p in paras)
         template  = _detect_template(full_text)
         required  = _REQUIRED_SECTIONS.get(template, [])
         if required:
             heading_texts = {
                 p.text.lower().strip()
-                for p in paras
+                for _, p in paras
                 if heading_style_level(p.style.name) is not None
             }
             missing = [s for s in required if s.lower() not in heading_texts]
@@ -505,7 +529,7 @@ def lint(path, cfg):
 
     # --- W014 Naming convention ---
     if rule_enabled(cfg, 'naming-convention'):
-        full_text = ' '.join(p.text for p in paras)
+        full_text = ' '.join(p.text for _, p in paras)
         template  = _detect_template(full_text)
         if template in _NAMING_PATTERNS:
             pattern, example = _NAMING_PATTERNS[template]
@@ -526,17 +550,12 @@ def lint(path, cfg):
         policy_path = Path(os.getcwd()) / _STYLE_POLICY_FILE
         if policy_path.exists():
             raw = policy_path.read_text(encoding='utf-8')
-            # Strip YAML frontmatter if present
-            body = raw
-            if raw.startswith('---'):
-                end = raw.find('\n---', 3)
-                if end != -1:
-                    body = raw[end + 4:].lstrip('\n')
+            body = _strip_yaml_frontmatter(raw)
             required = _extract_required_headings_from_policy(body)
             if required:
                 heading_texts = {
                     p.text.lower().strip()
-                    for p in paras
+                    for _, p in paras
                     if heading_style_level(p.style.name) is not None
                 }
                 for req in required:
@@ -681,7 +700,6 @@ def lint(path, cfg):
 
     # --- W021 Raw unlinked URLs ---
     if rule_enabled(cfg, 'raw-urls'):
-        _url_re = re.compile(r'https?://\S+')
         for idx, para in enumerate(doc.paragraphs):
             # Collect text already covered by hyperlink elements
             linked_texts: set[str] = set()
@@ -689,8 +707,8 @@ def lint(path, cfg):
                 hl_text = ''.join(t.text or '' for t in hl.findall('.//' + qn('w:t')))
                 if hl_text:
                     linked_texts.add(hl_text)
-            for m in _url_re.finditer(para.text):
-                url = m.group(0).rstrip('.,;)>')
+            for m in _RAW_URL_RE.finditer(para.text):
+                url = _clean_detected_url(m.group(0))
                 if url not in linked_texts:
                     issues.append({
                         "rule": "raw-urls", "code": "W021",
