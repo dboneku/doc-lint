@@ -333,8 +333,8 @@ def fix_numbered_headings(doc, cfg, applied, changes):
     """W012 — Renumber out-of-sequence heading prefixes to restore continuity."""
     if not rule_enabled(cfg, 'numbered-heading-continuity'):
         return
-    # Match "N. " prefix only (not hierarchical "N.N" sub-numbering)
-    numbered_pat = re.compile(r'^(\d+)(\.\s+)')
+    # Match "N." prefix only; exclude hierarchical sub-numbering like "N.N"
+    numbered_pat = re.compile(r'^(\d+)\.(?!\d)\s*')
     level_next = {}  # hlevel -> expected next number
     count = 0
     for para in doc.paragraphs:
@@ -349,10 +349,8 @@ def fix_numbered_headings(doc, cfg, applied, changes):
         stripped = para.text.strip()
         m = numbered_pat.match(stripped)
         if not m:
-            level_next.pop(hlevel, None)
-            for lv in list(level_next):
-                if lv > hlevel:
-                    del level_next[lv]
+            # Preserve expected counters across unnumbered headings to maintain
+            # numbering continuity semantics consistent with lint.py/docs.
             continue
         actual = int(m.group(1))
         expected = level_next.get(hlevel, 1)
@@ -363,23 +361,21 @@ def fix_numbered_headings(doc, cfg, applied, changes):
                 del level_next[lv]
         if actual == expected:
             continue
-        # Renumber: find the run that contains the number and replace it
+        # Renumber: find the run that starts with the old digit
         old_num = m.group(1)        # e.g. "3"
         new_num = str(expected)     # e.g. "4"
-        sep = m.group(2)            # e.g. ". "
         for run in para.runs:
+            # Look for the numeric part at the start of the run (after any leading
+            # whitespace). The punctuation/space may be in a different run.
             run_stripped = run.text.lstrip()
-            if run_stripped.startswith(old_num + sep[0]):
-                # Confirm the full prefix matches
-                rm = numbered_pat.match(run_stripped)
-                if rm and rm.group(1) == old_num:
-                    leading = len(run.text) - len(run_stripped)
-                    before = run.text
-                    run.text = (run.text[:leading] + new_num
-                                + run.text[leading + len(old_num):])
-                    changes.append(('W012', before[:80], run.text[:80]))
-                    count += 1
-                    break
+            if run_stripped.startswith(old_num):
+                leading = len(run.text) - len(run_stripped)
+                before = run.text
+                run.text = (run.text[:leading] + new_num
+                            + run.text[leading + len(old_num):])
+                changes.append(('W012', before[:80], run.text[:80]))
+                count += 1
+                break
     if count:
         applied.append(f"W012: Renumbered {count} out-of-sequence heading(s)")
 
@@ -476,8 +472,10 @@ def fix_heading_capitalization(doc, cfg, applied, changes):
             if not token.strip():
                 continue
             bare = token.strip('("\')\':,.!?-')
+            if not bare:
+                continue
             if word_idx == 0 or bare.lower() not in _TC_SKIP:
-                if bare and bare[0].islower():
+                if bare[0].islower():
                     return False
             word_idx += 1
         return True

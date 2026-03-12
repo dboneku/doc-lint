@@ -449,8 +449,8 @@ def lint(path, cfg):
 
     # --- W012 Numbered heading continuity ---
     if rule_enabled(cfg, 'numbered-heading-continuity'):
-        # Match "N. " prefix only (not hierarchical "N.N" sub-numbering)
-        numbered_pat = re.compile(r'^(\d+)\.\s')
+        # Match "N." prefix only; exclude hierarchical sub-numbering like "N.N"
+        numbered_pat = re.compile(r'^(\d+)\.(?!\d)\s*')
         level_next: dict = {}  # hlevel -> expected next number
         for idx, para in enumerate(paras):
             hlevel = heading_style_level(para.style.name)
@@ -458,11 +458,8 @@ def lint(path, cfg):
                 continue
             m = numbered_pat.match(para.text.strip())
             if not m:
-                # Unnumbered heading resets the counter for this level and children
-                level_next.pop(hlevel, None)
-                for lv in list(level_next):
-                    if lv > hlevel:
-                        del level_next[lv]
+                # Unnumbered heading: do not modify continuity counters; only numbered
+                # headings affect the expected sequence.
                 continue
             actual = int(m.group(1))
             expected = level_next.get(hlevel, 1)
@@ -654,15 +651,17 @@ def lint(path, cfg):
         }
 
         def _is_title_case(text: str) -> bool:
-            for i, token in enumerate(re.split(r'(\s+)', text)):
+            word_idx = 0
+            for token in re.split(r'(\s+)', text):
                 if not token.strip():
                     continue
                 bare = token.strip('("\')\':,.!?-')
                 if not bare:
                     continue
-                if i == 0 or bare.lower() not in _tc_skip:
+                if word_idx == 0 or bare.lower() not in _tc_skip:
                     if bare[0].islower():
                         return False
+                word_idx += 1
             return True
 
         for idx, para in enumerate(doc.paragraphs):
