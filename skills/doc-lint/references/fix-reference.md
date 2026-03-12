@@ -107,7 +107,6 @@ current_level = 0
 for para in doc.paragraphs:
     style = para.style.name
     if style not in HEADING_STYLES:
-        current_level = 0
         continue
     level = int(style.split()[-1])
     if level > current_level + 1:

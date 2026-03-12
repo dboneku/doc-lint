@@ -29,6 +29,13 @@ Works in two ways:
 | W012 | Numbered heading continuity (manual numbers restart mid-document) | Yes |
 | W013 | Template compliance (required sections missing for detected template) | No — requires adding content |
 | W014 | Naming convention (filename doesn't match template naming pattern) | No — requires renaming the file |
+| W015 | Style policy compliance (headings required by `.style-policy.md` are missing) | No — requires adding content |
+| W016 | Excess blank paragraphs (more than one consecutive blank paragraph) | Yes |
+| E017 | Placeholder text (TODO, TBD, Lorem ipsum, `[INSERT …]`, `<<…>>`) | No — requires real content |
+| E018 | Unaccepted track changes remaining in the document | No — accept or reject in Word |
+| W019 | Double spaces in paragraph text | Yes |
+| W020 | Heading not in title case (configurable) | Yes |
+| W021 | Raw unlinked URLs in body text | Yes |
 
 ---
 

@@ -22,6 +22,13 @@ All rules, their codes, default severity, auto-fix status, and configuration opt
 | W012 | numbered-heading-continuity | warning | Yes |
 | W013 | template-compliance | warning | No — requires adding content |
 | W014 | naming-convention | warning | No — requires renaming the file |
+| W015 | style-policy | warning | No — requires adding content |
+| W016 | excess-blank-paragraphs | warning | Yes |
+| E017 | placeholder-text | error | No — requires real content |
+| E018 | track-changes | error | No — accept or reject in Word |
+| W019 | double-spaces | warning | Yes |
+| W020 | heading-capitalization | warning | Yes |
+| W021 | raw-urls | warning | Yes |
 
 ---
 
@@ -315,6 +322,126 @@ H2: 2. Related Documents  ← W012: expected 5, found 2
 **Configuration:**
 ```json
 "numbered-heading-continuity": { "severity": "warning" }
+```
+
+---
+
+## W015 — Style Policy
+
+**Description:** One or more headings required by a local `.style-policy.md` file are missing from the document.
+
+**Why it matters:** Organisations can define house-style rules in a Markdown file. This rule enforces those rules automatically so every document in the project meets the same structural standard.
+
+**Detection:** If `.style-policy.md` exists in the working directory, the linter parses it for required section/heading names and checks that each appears as a heading in the document.
+
+**Auto-fix:** No — missing sections require the user to write content.
+
+**Configuration:**
+```json
+"style-policy": { "enabled": true, "severity": "warning" }
+```
+
+---
+
+## W016 — Excess Blank Paragraphs
+
+**Description:** More than one consecutive blank paragraph.
+
+**Why it matters:** Multiple blank lines between sections are a visual spacing hack that creates inconsistent layout and inflates document length. Use paragraph spacing settings instead.
+
+**Detection:** Walk all paragraphs (including empty ones). Count consecutive blank paragraphs. Flag any run greater than 1.
+
+**Auto-fix:** Yes — removes all blank paragraphs beyond the first in each consecutive run.
+
+**Configuration:**
+```json
+"excess-blank-paragraphs": { "enabled": true, "severity": "warning" }
+```
+
+---
+
+## E017 — Placeholder Text
+
+**Description:** The document contains placeholder or draft text that has not been replaced with real content.
+
+**Detected patterns:** `TODO`, `TBD`, `PLACEHOLDER`, `[INSERT …]`, `[DRAFT]`, `Lorem ipsum`, `<<…>>`
+
+**Why it matters:** Placeholder text in a published document indicates an incomplete draft. This is an error because such documents must never be distributed.
+
+**Auto-fix:** No — requires the user to write the missing content.
+
+**Configuration:**
+```json
+"placeholder-text": { "enabled": true, "severity": "error" }
+```
+
+---
+
+## E018 — Track Changes
+
+**Description:** The document contains unaccepted tracked insertions or deletions.
+
+**Why it matters:** Documents with tracked changes expose revision history to readers and render differently depending on the viewer's Word settings. All changes must be accepted or rejected before publishing.
+
+**Detection:** Count `<w:ins>` and `<w:del>` elements in the document body XML.
+
+**Auto-fix:** No — open the document in Word and use **Review → Accept All Changes** or **Reject All Changes**.
+
+**Configuration:**
+```json
+"track-changes": { "enabled": true, "severity": "error" }
+```
+
+---
+
+## W019 — Double Spaces
+
+**Description:** Two or more consecutive spaces in paragraph text.
+
+**Why it matters:** Double spaces are a legacy habit from typewriters. They create uneven spacing in proportional fonts and are invisible to many readers, making them hard to fix manually.
+
+**Detection:** Search each paragraph's text for two or more consecutive space characters.
+
+**Auto-fix:** Yes — collapses all runs of multiple spaces to a single space.
+
+**Configuration:**
+```json
+"double-spaces": { "enabled": true, "severity": "warning" }
+```
+
+---
+
+## W020 — Heading Capitalization
+
+**Description:** A heading does not follow the configured capitalization style.
+
+**Supported styles:**
+- `"title"` (default): Every word is capitalised except articles and short prepositions (e.g. *The Quick Brown Fox*).
+- `"sentence"`: Only the first word and proper nouns are capitalised (e.g. *The quick brown fox*).
+
+**Auto-fix:** Yes — converts heading text to the configured style. Only `"title"` case is auto-fixed; `"sentence"` case requires human judgment for proper nouns.
+
+**Configuration:**
+```json
+"heading-capitalization": { "enabled": true, "severity": "warning", "style": "title" }
+```
+`style`: `"title"` (default) or `"sentence"`.
+
+---
+
+## W021 — Raw URLs
+
+**Description:** A plain-text URL appears in body text that is not wrapped in a Word hyperlink.
+
+**Why it matters:** Plain URLs do not activate as clickable links in all readers and PDF exports. They also make documents less accessible.
+
+**Detection:** Search paragraph text for `http://` or `https://` URLs not already contained in a `<w:hyperlink>` element.
+
+**Auto-fix:** Yes — creates a Word hyperlink relationship and wraps the URL in a `<w:hyperlink>` element with `Hyperlink` character style.
+
+**Configuration:**
+```json
+"raw-urls": { "enabled": true, "severity": "warning" }
 ```
 
 ---
