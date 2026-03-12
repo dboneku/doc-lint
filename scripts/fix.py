@@ -40,6 +40,20 @@ DEFAULT_CONFIG = {
         "raw-urls":                {"enabled": True},
     }
 }
+_RAW_URL_RE = re.compile(r'https?://[^\s<>"\]]+')
+
+
+def _warn(message: str):
+    print(f"WARNING: {message}", file=sys.stderr)
+
+
+def _clean_detected_url(raw_url: str) -> str:
+    url = raw_url.rstrip('.,;:!?>')
+    while url.endswith(')') and url.count('(') < url.count(')'):
+        url = url[:-1]
+    while url.endswith(']') and url.count('[') < url.count(']'):
+        url = url[:-1]
+    return url
 
 # Template for --init-config
 _CONFIG_TEMPLATE = {
@@ -204,8 +218,8 @@ def fix_list_normalization(doc, cfg, applied, changes):
                 changes.append(('W006', f'[list format: {old_fmt} → decimal]', ''))
                 el.set(qn('w:val'), 'decimal')
                 count += 1
-    except Exception:
-        pass
+    except Exception as exc:
+        _warn(f"Could not normalize list numbering XML: {exc}")
     if count:
         applied.append(f"W006: Normalized {count} list level(s) to decimal numbering")
 
@@ -507,7 +521,6 @@ def fix_raw_urls(doc, cfg, applied, changes):
     """W021: Convert raw plain-text URLs into Word hyperlinks."""
     if not rule_enabled(cfg, 'raw-urls'):
         return
-    _url_re = re.compile(r'https?://\S+')
     count = 0
     for para in doc.paragraphs:
         # Collect URLs already in hyperlinks
@@ -517,10 +530,10 @@ def fix_raw_urls(doc, cfg, applied, changes):
             if hl_text:
                 linked.add(hl_text)
         for run in list(para.runs):
-            m = _url_re.search(run.text)
+            m = _RAW_URL_RE.search(run.text)
             if not m:
                 continue
-            url = m.group(0).rstrip('.,;)>')
+            url = _clean_detected_url(m.group(0))
             if url in linked:
                 continue
             # Add a relationship and build a <w:hyperlink> element

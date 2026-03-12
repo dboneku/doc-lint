@@ -4,6 +4,8 @@ argument-hint: path/to/file.docx
 allowed-tools: Bash
 ---
 
+# Doc-Lint Check
+
 Lint a single .docx file and report all formatting issues. Do not modify any files.
 
 ## Steps
@@ -11,6 +13,7 @@ Lint a single .docx file and report all formatting issues. Do not modify any fil
 1. Get the file path from the argument. If not provided, ask for it.
 
 2. Run the linter:
+
    ```bash
    python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lint.py" --file "$FILE_PATH" --json
    ```

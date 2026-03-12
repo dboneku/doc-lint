@@ -5,7 +5,7 @@ ESLint for Word documents. Analyzes `.docx` files for formatting and structural 
 Works in two ways:
 
 | Mode | Where | How |
-|---|---|---|
+| --- | --- | --- |
 | **Claude Code CLI plugin** | Terminal / Claude Code | Runs Python scripts locally — full detection + auto-fix |
 | **Claude.ai / coworker skill** | Claude.ai, Claude Projects, coworker | Claude reads document content — structural rules + fix guidance |
 
@@ -14,7 +14,7 @@ Works in two ways:
 ## What it catches
 
 | Code | Issue | Auto-fix |
-|---|---|---|
+| --- | --- | --- |
 | E001 | Consecutive headings with no body content between them | No — needs content or restructuring |
 | E002 | Empty sections (heading immediately followed by another heading) | No |
 | W003 | Heading style misused for body text (e.g. Heading 1 at 11pt) | Yes |
@@ -52,32 +52,41 @@ claude plugin install https://github.com/dboneku/doc-lint
 pip install python-docx
 ```
 
+For reproducible local runs, install from [scripts/requirements.txt](scripts/requirements.txt):
+
+```bash
+pip install -r scripts/requirements.txt
+```
+
 ### Commands
 
 #### `/doc-lint:check <file>`
+
 Analyze a file and report all issues. Read-only — nothing is modified.
 
-```
+```text
 /doc-lint:check docs/HR-Policy.docx
 ```
 
 #### `/doc-lint:fix <file> [--overwrite]`
+
 Analyze and auto-fix all fixable issues. Saves as `filename.fixed.docx` by default.
 
-```
+```text
 /doc-lint:fix docs/HR-Policy.docx
 /doc-lint:fix docs/HR-Policy.docx --overwrite
 ```
 
 #### `/doc-lint:check-folder <folder> [--fix-all]`
+
 Check all `.docx` files in a folder and show a summary table.
 
-```
+```text
 /doc-lint:check-folder ./HR-Policies
 /doc-lint:check-folder ./HR-Policies --fix-all
 ```
 
-The CLI plugin runs `scripts/lint.py` and `scripts/fix.py` against the real document XML, giving it full access to font names, font sizes, style definitions, and list numbering formats. It can detect and auto-fix all 14 rules.
+The CLI plugin runs `scripts/lint.py` and `scripts/fix.py` against the real document XML, giving it full access to font names, font sizes, style definitions, and list numbering formats. It can detect all rules and auto-fix 13 of them.
 
 ---
 
@@ -96,13 +105,14 @@ No installation required. Upload a `.docx` file to Claude.ai (or any Claude inte
 Claude will apply the doc-lint rule set to the document content and produce a report in the standard doc-lint format. For structural rules (heading structure, list format, numbered continuity, template compliance, naming convention), detection is identical to the CLI. For font and style metadata rules (W003, W004, W005, I010), Claude will flag obvious cases and recommend the CLI plugin for full accuracy.
 
 For fixable issues, Claude provides:
+
 - Word-by-word renumbering corrections for W012
 - Section-by-section fix instructions for structural issues
 - Recommended edits for list and heading problems
 
 ### Example prompt
 
-```
+```text
 Here's our HR policy document. Can you lint it for formatting issues using the doc-lint rules?
 The filename is ACME-HR-001 Recruitment Policy.docx
 ```
@@ -158,7 +168,7 @@ The linter exits with code `1` if any errors are found, `0` otherwise — making
 ## Skill files
 
 | File | Purpose |
-|---|---|
+| --- | --- |
 | [`skills/doc-lint/SKILL.md`](skills/doc-lint/SKILL.md) | Claude Code CLI skill definition |
 | [`skills/doc-lint/SKILL-web.md`](skills/doc-lint/SKILL-web.md) | Claude.ai / coworker skill definition |
 | [`skills/doc-lint/references/rules.md`](skills/doc-lint/references/rules.md) | Complete rule catalog |
