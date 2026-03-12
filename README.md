@@ -2,6 +2,15 @@
 
 ESLint for Word documents. Analyzes `.docx` files for formatting and structural issues, then auto-fixes the ones it can.
 
+Works in two ways:
+
+| Mode | Where | How |
+|---|---|---|
+| **Claude Code CLI plugin** | Terminal / Claude Code | Runs Python scripts locally — full detection + auto-fix |
+| **Claude.ai / coworker skill** | Claude.ai, Claude Projects, coworker | Claude reads document content — structural rules + fix guidance |
+
+---
+
 ## What it catches
 
 | Code | Issue | Auto-fix |
@@ -21,28 +30,31 @@ ESLint for Word documents. Analyzes `.docx` files for formatting and structural 
 | W013 | Template compliance (required sections missing for detected template) | No — requires adding content |
 | W014 | Naming convention (filename doesn't match template naming pattern) | No — requires renaming the file |
 
-## Installation
+---
+
+## Option 1 — Claude Code CLI plugin
+
+Install once, then use slash commands in Claude Code to lint and auto-fix `.docx` files.
+
+**Requirements:** Claude Code, Python 3.9+, `python-docx`
+
+### Installation
 
 ```bash
 claude plugin install https://github.com/dboneku/doc-lint
-```
-
-Install Python dependency:
-
-```bash
 pip install python-docx
 ```
 
-## Commands
+### Commands
 
-### `/doc-lint:check <file>`
+#### `/doc-lint:check <file>`
 Analyze a file and report all issues. Read-only — nothing is modified.
 
 ```
 /doc-lint:check docs/HR-Policy.docx
 ```
 
-### `/doc-lint:fix <file> [--overwrite]`
+#### `/doc-lint:fix <file> [--overwrite]`
 Analyze and auto-fix all fixable issues. Saves as `filename.fixed.docx` by default.
 
 ```
@@ -50,13 +62,45 @@ Analyze and auto-fix all fixable issues. Saves as `filename.fixed.docx` by defau
 /doc-lint:fix docs/HR-Policy.docx --overwrite
 ```
 
-### `/doc-lint:check-folder <folder> [--fix-all]`
+#### `/doc-lint:check-folder <folder> [--fix-all]`
 Check all `.docx` files in a folder and show a summary table.
 
 ```
 /doc-lint:check-folder ./HR-Policies
 /doc-lint:check-folder ./HR-Policies --fix-all
 ```
+
+The CLI plugin runs `scripts/lint.py` and `scripts/fix.py` against the real document XML, giving it full access to font names, font sizes, style definitions, and list numbering formats. It can detect and auto-fix all 14 rules.
+
+---
+
+## Option 2 — Claude.ai / coworker skill
+
+No installation required. Upload a `.docx` file to Claude.ai (or any Claude interface that supports file uploads) and ask Claude to lint it.
+
+**Works in:** Claude.ai, Claude Projects, Claude coworker, Claude API with file input
+
+### How to use
+
+1. Open Claude.ai (or your Claude coworker/project)
+2. Upload your `.docx` file
+3. Ask: *"Can you lint this document for formatting issues?"* or *"Check this Word doc for formatting problems"*
+
+Claude will apply the doc-lint rule set to the document content and produce a report in the standard doc-lint format. For structural rules (heading structure, list format, numbered continuity, template compliance, naming convention), detection is identical to the CLI. For font and style metadata rules (W003, W004, W005, I010), Claude will flag obvious cases and recommend the CLI plugin for full accuracy.
+
+For fixable issues, Claude provides:
+- Word-by-word renumbering corrections for W012
+- Section-by-section fix instructions for structural issues
+- Recommended edits for list and heading problems
+
+### Example prompt
+
+```
+Here's our HR policy document. Can you lint it for formatting issues using the doc-lint rules?
+The filename is ACME-HR-001 Recruitment Policy.docx
+```
+
+---
 
 ## Configuration
 
@@ -81,7 +125,11 @@ Create a `.doc-lint.json` in your project to customize rules:
 }
 ```
 
+For CLI use, place `.doc-lint.json` in your project directory. For Claude.ai use, paste the config contents into your prompt.
+
 All rules are enabled by default. See the [full rule catalog](skills/doc-lint/references/rules.md) for all options.
+
+---
 
 ## Run directly (without Claude)
 
@@ -98,11 +146,23 @@ python3 scripts/lint.py --file path/to/file.docx --json
 
 The linter exits with code `1` if any errors are found, `0` otherwise — making it suitable for CI/CD pipelines.
 
+---
+
+## Skill files
+
+| File | Purpose |
+|---|---|
+| [`skills/doc-lint/SKILL.md`](skills/doc-lint/SKILL.md) | Claude Code CLI skill definition |
+| [`skills/doc-lint/SKILL-web.md`](skills/doc-lint/SKILL-web.md) | Claude.ai / coworker skill definition |
+| [`skills/doc-lint/references/rules.md`](skills/doc-lint/references/rules.md) | Complete rule catalog |
+| [`skills/doc-lint/references/fix-reference.md`](skills/doc-lint/references/fix-reference.md) | Auto-fix technical reference |
+
+---
+
 ## Requirements
 
-- Claude Code
-- Python 3.9+
-- `python-docx` (`pip install python-docx`)
+- **CLI plugin:** Claude Code, Python 3.9+, `python-docx` (`pip install python-docx`)
+- **Claude.ai skill:** Claude.ai account or Claude API access — no local dependencies
 
 ## License
 
