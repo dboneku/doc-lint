@@ -626,8 +626,10 @@ def main():
         if changes:
             # Before/after diff table
             col_w = 42
+            rule_line = '\u2500' * 6
+            content_line = '\u2500' * col_w
             print(f"\n  {'CODE':<6}  {'BEFORE':<{col_w}}  AFTER")
-            print(f"  {'\u2500'*6}  {'\u2500'*col_w}  {'\u2500'*col_w}")
+            print(f"  {rule_line}  {content_line}  {content_line}")
             for code, before, after in changes:
                 b = (before[:col_w - 1] + '\u2026') if len(before) > col_w else before
                 a = (after[:col_w - 1]  + '\u2026') if len(after)  > col_w else after

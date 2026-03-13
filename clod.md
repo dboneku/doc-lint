@@ -26,3 +26,4 @@
 - Make failure paths visible instead of silently swallowing XML or subprocess errors.
 - Preserve safe fallback behavior when a fix cannot be applied.
 - Keep both helper tests and `.docx` integration tests current before expanding the rule surface.
+- Keep CI running both Python regression tests and markdown lint so command and README drift gets caught early.
