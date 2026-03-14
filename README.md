@@ -8,6 +8,7 @@ Works in two ways:
 | --- | --- | --- |
 | **Claude Code CLI plugin** | Terminal / Claude Code | Runs Python scripts locally — full detection + auto-fix |
 | **Claude.ai / coworker skill** | Claude.ai, Claude Projects, coworker | Claude reads document content — structural rules + fix guidance |
+| **MCP server** | Any MCP-compatible client | AI calls Python tools over stdio — full detection + auto-fix |
 
 ---
 
@@ -119,6 +120,79 @@ The filename is ACME-HR-001 Recruitment Policy.docx
 
 ---
 
+## Option 3 — MCP server
+
+Runs as an [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server so any MCP-compatible AI client — Claude Desktop, Cursor, Copilot, or the MCP CLI — can lint and fix `.docx` files directly through tool calls.
+
+**Requirements:** Python 3.9+, `python-docx`, `mcp[cli]>=1.0`
+
+### Installation
+
+```bash
+pip install -r scripts/requirements.txt
+```
+
+### Add to Claude Desktop
+
+Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
+
+```json
+{
+  "mcpServers": {
+    "doc-lint": {
+      "command": "python",
+      "args": ["/absolute/path/to/doc-lint/scripts/mcp_server.py"]
+    }
+  }
+}
+```
+
+Restart Claude Desktop. The three tools below will be available automatically.
+
+### Tools
+
+#### `lint_document`
+
+Lints a `.docx` file and returns a structured report.
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `docx_base64` | string | Base64-encoded `.docx` file contents |
+| `filename` | string | Original filename (used by naming-convention rule W014) |
+| `config` | object \| null | Custom rule config; omit for defaults |
+
+Returns `{ issues: [...], summary: { total, errors, warnings, info, fixable } }`
+
+#### `fix_document`
+
+Applies all auto-fixable corrections and returns the updated document.
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `docx_base64` | string | Base64-encoded `.docx` file contents |
+| `filename` | string | Original filename (informational) |
+| `config` | object \| null | Custom rule config; omit for defaults |
+
+Returns `{ fixed_docx_base64: string, applied: [...], changes: [...] }`
+
+#### `get_default_config`
+
+Returns the built-in rule configuration as a JSON object — useful as a starting point for customisation.
+
+### Run standalone (stdio)
+
+```bash
+python scripts/mcp_server.py
+```
+
+Or via the MCP CLI:
+
+```bash
+mcp run scripts/mcp_server.py
+```
+
+---
+
 ## Configuration
 
 Create a `.doc-lint.json` in your project to customize rules:
@@ -180,6 +254,7 @@ The linter exits with code `1` if any errors are found, `0` otherwise — making
 
 - **CLI plugin:** Claude Code, Python 3.9+, `python-docx` (`pip install python-docx`)
 - **Claude.ai skill:** Claude.ai account or Claude API access — no local dependencies
+- **MCP server:** Python 3.9+, `pip install -r scripts/requirements.txt` (`python-docx` + `mcp[cli]`)
 
 ## License
 
