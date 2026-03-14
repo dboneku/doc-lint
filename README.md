@@ -2,7 +2,7 @@
 
 ESLint for Word documents. Analyzes `.docx` files for formatting and structural issues, then auto-fixes the ones it can.
 
-Works in two ways:
+Works in three ways:
 
 | Mode | Where | How |
 | --- | --- | --- |
@@ -46,7 +46,7 @@ Install once, then use slash commands in Claude Code to lint and auto-fix `.docx
 
 **Requirements:** Claude Code, Python 3.9+, `python-docx`
 
-### Installation
+### Install CLI plugin
 
 ```bash
 claude plugin install https://github.com/dboneku/doc-lint
@@ -126,7 +126,7 @@ Runs as an [MCP (Model Context Protocol)](https://modelcontextprotocol.io) serve
 
 **Requirements:** Python 3.9+, `python-docx`, `mcp[cli]>=1.0`
 
-### Installation
+### Install MCP dependencies
 
 ```bash
 pip install -r scripts/requirements.txt
@@ -148,6 +148,7 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) o
 ```
 
 Restart Claude Desktop. The three tools below will be available automatically.
+Use the Python interpreter from the environment where you installed `mcp[cli]` and `python-docx` if `python` is not already that interpreter.
 
 ### Tools
 
@@ -159,7 +160,7 @@ Lints a `.docx` file and returns a structured report.
 | --- | --- | --- |
 | `docx_base64` | string | Base64-encoded `.docx` file contents |
 | `filename` | string | Original filename (used by naming-convention rule W014) |
-| `config` | object \| null | Custom rule config; omit for defaults |
+| `config` | object \| null | Partial config override; omitted fields inherit defaults |
 
 Returns `{ issues: [...], summary: { total, errors, warnings, info, fixable } }`
 
@@ -171,13 +172,15 @@ Applies all auto-fixable corrections and returns the updated document.
 | --- | --- | --- |
 | `docx_base64` | string | Base64-encoded `.docx` file contents |
 | `filename` | string | Original filename (informational) |
-| `config` | object \| null | Custom rule config; omit for defaults |
+| `config` | object \| null | Partial config override; omitted fields inherit defaults |
 
 Returns `{ fixed_docx_base64: string, applied: [...], changes: [...] }`
 
 #### `get_default_config`
 
 Returns the built-in rule configuration as a JSON object — useful as a starting point for customisation.
+
+Rule overrides are merged on top of the built-in defaults using the same semantics as `.doc-lint.json`. That means you can send only the rules you want to change instead of the full config object.
 
 ### Run standalone (stdio)
 
@@ -216,7 +219,7 @@ Create a `.doc-lint.json` in your project to customize rules:
 }
 ```
 
-For CLI use, place `.doc-lint.json` in your project directory. For Claude.ai use, paste the config contents into your prompt.
+For CLI use, place `.doc-lint.json` in your project directory. For Claude.ai use, paste the config contents into your prompt. For MCP use, pass the same object as the `config` argument to `lint_document` or `fix_document`; partial overrides are merged with defaults.
 
 All rules are enabled by default. See the [full rule catalog](skills/doc-lint/references/rules.md) for all options.
 
@@ -236,6 +239,19 @@ python3 scripts/lint.py --file path/to/file.docx --json
 ```
 
 The linter exits with code `1` if any errors are found, `0` otherwise — making it suitable for CI/CD pipelines.
+
+---
+
+## Development
+
+### Validate MCP support
+
+```bash
+python -m unittest discover -s tests -p 'test_*.py'
+python -c "import sys; sys.path.insert(0, 'scripts'); import mcp_server; print('mcp_server OK')"
+```
+
+The test suite covers both mocked MCP tool behavior and `.docx` integration checks. CI also imports `scripts/mcp_server.py` directly as a smoke test.
 
 ---
 

@@ -25,6 +25,7 @@ unchanged — this is a separate, additive deployment option.
 """
 
 import base64
+import binascii
 import copy
 import sys
 import tempfile
@@ -46,6 +47,67 @@ import lint as _lint_mod
 import fix as _fix_mod
 
 mcp = FastMCP("doc-lint")
+
+_FIXER_NAMES = (
+    "fix_style_misuse",
+    "fix_font_normalization",
+    "fix_font_size",
+    "fix_list_normalization",
+    "fix_heading_level_skip",
+    "fix_single_item_lists",
+    "fix_multiline_headings",
+    "fix_numbered_headings",
+    "fix_excess_blank_paragraphs",
+    "fix_double_spaces",
+    "fix_heading_capitalization",
+    "fix_raw_urls",
+)
+
+
+def _decode_docx_base64(docx_base64: str) -> bytes:
+    try:
+        return base64.b64decode(docx_base64, validate=True)
+    except (binascii.Error, ValueError, TypeError) as exc:
+        raise ValueError(
+            "docx_base64 must be valid base64-encoded .docx bytes"
+        ) from exc
+
+
+def _merge_config(default_config: dict, overrides: dict | None) -> dict:
+    cfg = copy.deepcopy(default_config)
+    if overrides is None:
+        return cfg
+    if not isinstance(overrides, dict):
+        raise ValueError("config must be a JSON object")
+
+    for key, value in overrides.items():
+        if key == "rules":
+            continue
+        cfg[key] = copy.deepcopy(value)
+
+    for rule, settings in overrides.get("rules", {}).items():
+        if isinstance(settings, str):
+            if settings == "off":
+                cfg["rules"].setdefault(rule, {})["enabled"] = False
+            else:
+                cfg["rules"].setdefault(rule, {}).update(
+                    {"enabled": True, "severity": settings}
+                )
+        elif isinstance(settings, dict):
+            cfg["rules"].setdefault(rule, {}).update(copy.deepcopy(settings))
+        else:
+            raise ValueError(
+                f'config.rules.{rule} must be an object or one of "off", '
+                '"error", "warning", "info"'
+            )
+    return cfg
+
+
+def _safe_filename(filename: str) -> str:
+    basename = Path(filename or "document.docx").name or "document.docx"
+    if basename.lower().endswith(".docx"):
+        return basename
+    return f"{basename}.docx"
 
 
 # ---------------------------------------------------------------------------
@@ -71,20 +133,13 @@ def lint_document(
       - issues:  list of {rule, code, severity, message, line, text, fixable}
       - summary: {total, errors, warnings, info, fixable}
     """
-    data = base64.b64decode(docx_base64)
-    cfg = config or copy.deepcopy(_lint_mod.DEFAULT_CONFIG)
+    data = _decode_docx_base64(docx_base64)
+    cfg = _merge_config(_lint_mod.DEFAULT_CONFIG, config)
 
-    stem = Path(filename).stem
-    with tempfile.NamedTemporaryFile(
-        suffix=".docx", prefix=f"{stem}_", delete=False
-    ) as tmp:
-        tmp.write(data)
-        tmp_path = Path(tmp.name)
-
-    try:
+    with tempfile.TemporaryDirectory(prefix="doc-lint-") as tmpdir:
+        tmp_path = Path(tmpdir) / _safe_filename(filename)
+        tmp_path.write_bytes(data)
         issues = _lint_mod.lint(tmp_path, cfg)
-    finally:
-        tmp_path.unlink(missing_ok=True)
 
     errors = sum(1 for i in issues if i["severity"] == "error")
     warnings = sum(1 for i in issues if i["severity"] == "warning")
@@ -134,41 +189,24 @@ def fix_document(
     """
     from docx import Document as _Document
 
-    data = base64.b64decode(docx_base64)
-    cfg = config or copy.deepcopy(_fix_mod.DEFAULT_CONFIG)
+    data = _decode_docx_base64(docx_base64)
+    cfg = _merge_config(_fix_mod.DEFAULT_CONFIG, config)
 
-    stem = Path(filename).stem
-    with tempfile.NamedTemporaryFile(
-        suffix=".docx", prefix=f"{stem}_", delete=False
-    ) as tmp:
-        tmp.write(data)
-        tmp_path = Path(tmp.name)
+    with tempfile.TemporaryDirectory(prefix="doc-lint-") as tmpdir:
+        tmp_path = Path(tmpdir) / _safe_filename(filename)
+        out_path = tmp_path.with_name(tmp_path.stem + ".fixed.docx")
+        tmp_path.write_bytes(data)
 
-    out_path = tmp_path.with_name(tmp_path.stem + ".fixed.docx")
-
-    try:
         doc = _Document(str(tmp_path))
         applied: list[str] = []
         changes: list[tuple] = []
 
-        _fix_mod.fix_style_misuse(doc, cfg, applied, changes)
-        _fix_mod.fix_font_normalization(doc, cfg, applied, changes)
-        _fix_mod.fix_font_size(doc, cfg, applied, changes)
-        _fix_mod.fix_list_normalization(doc, cfg, applied, changes)
-        _fix_mod.fix_heading_level_skip(doc, cfg, applied, changes)
-        _fix_mod.fix_single_item_lists(doc, cfg, applied, changes)
-        _fix_mod.fix_multiline_headings(doc, cfg, applied, changes)
-        _fix_mod.fix_numbered_headings(doc, cfg, applied, changes)
-        _fix_mod.fix_excess_blank_paragraphs(doc, cfg, applied, changes)
-        _fix_mod.fix_double_spaces(doc, cfg, applied, changes)
-        _fix_mod.fix_heading_capitalization(doc, cfg, applied, changes)
-        _fix_mod.fix_raw_urls(doc, cfg, applied, changes)
+        for fixer_name in _FIXER_NAMES:
+            fixer = getattr(_fix_mod, fixer_name)
+            fixer(doc, cfg, applied, changes)
 
         doc.save(str(out_path))
         fixed_bytes = out_path.read_bytes()
-    finally:
-        tmp_path.unlink(missing_ok=True)
-        out_path.unlink(missing_ok=True)
 
     return {
         "fixed_docx_base64": base64.b64encode(fixed_bytes).decode(),

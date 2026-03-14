@@ -6,6 +6,7 @@ The mcp package must be installed (it is listed in requirements.txt).
 """
 
 import base64
+import importlib.util
 import sys
 import types
 import unittest
@@ -15,23 +16,37 @@ from unittest.mock import MagicMock, patch
 # ---------------------------------------------------------------------------
 # Stub docx before importing any script module that requires it.
 # ---------------------------------------------------------------------------
-_docx_stub = types.SimpleNamespace(Document=MagicMock())
+def _module(name: str, **attrs):
+    module = types.ModuleType(name)
+    for key, value in attrs.items():
+        setattr(module, key, value)
+    return module
+
+
+_docx_stub = _module("docx", Document=MagicMock())
 sys.modules.setdefault("docx", _docx_stub)
-sys.modules.setdefault("docx.oxml", types.SimpleNamespace(OxmlElement=MagicMock()))
-sys.modules.setdefault("docx.oxml.ns", types.SimpleNamespace(qn=lambda v: v))
-sys.modules.setdefault("docx.shared", types.SimpleNamespace(Pt=lambda v: v))
+sys.modules.setdefault("docx.oxml", _module("docx.oxml", OxmlElement=MagicMock()))
+sys.modules.setdefault("docx.oxml.ns", _module("docx.oxml.ns", qn=lambda v: v))
+sys.modules.setdefault("docx.shared", _module("docx.shared", Pt=lambda v: v))
 sys.modules.setdefault("docx.opc", types.ModuleType("docx.opc"))
 sys.modules.setdefault(
     "docx.opc.constants",
-    types.SimpleNamespace(RELATIONSHIP_TYPE=types.SimpleNamespace()),
+    _module("docx.opc.constants", RELATIONSHIP_TYPE=types.SimpleNamespace()),
 )
 
-# Add scripts/ to path so 'import mcp_server' resolves
-_scripts = Path(__file__).resolve().parents[1] / "scripts"
-if str(_scripts) not in sys.path:
-    sys.path.insert(0, str(_scripts))
 
-import mcp_server  # noqa: E402
+def _load_module(name: str, relative_path: str):
+    root = Path(__file__).resolve().parents[1]
+    module_path = root / relative_path
+    spec = importlib.util.spec_from_file_location(name, module_path)
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+mcp_server = _load_module("doc_lint_mcp_server", "scripts/mcp_server.py")
 
 
 # ---------------------------------------------------------------------------
@@ -68,7 +83,12 @@ class TestGetDefaultConfig(unittest.TestCase):
 
 class TestLintDocument(unittest.TestCase):
     def setUp(self):
-        mcp_server._lint_mod.DEFAULT_CONFIG = {"rules": {}}
+        mcp_server._lint_mod.DEFAULT_CONFIG = {
+            "rules": {
+                "naming-convention": {"enabled": True, "severity": "warning"},
+                "font-normalization": {"enabled": True, "target-font": "Calibri"},
+            }
+        }
 
     def test_summary_counts_by_severity(self):
         mcp_server._lint_mod.lint = MagicMock(return_value=[
@@ -124,6 +144,52 @@ class TestLintDocument(unittest.TestCase):
         for p in created_paths:
             self.assertFalse(p.exists(), f"Temp file not removed: {p}")
 
+    def test_filename_is_preserved_for_naming_rule(self):
+        captured = {}
+
+        def capturing_lint(path, cfg):
+            captured["name"] = Path(path).name
+            return []
+
+        mcp_server._lint_mod.lint = capturing_lint
+
+        mcp_server.lint_document(_b64(), filename="ACME-HR-001 Recruitment Policy.docx")
+
+        self.assertEqual(captured["name"], "ACME-HR-001 Recruitment Policy.docx")
+
+    def test_partial_config_is_merged_with_defaults(self):
+        captured = {}
+
+        def capturing_lint(path, cfg):
+            captured["cfg"] = cfg
+            return []
+
+        mcp_server._lint_mod.lint = capturing_lint
+
+        mcp_server.lint_document(
+            _b64(),
+            config={"rules": {"naming-convention": "off"}},
+        )
+
+        self.assertFalse(captured["cfg"]["rules"]["naming-convention"]["enabled"])
+        self.assertEqual(
+            captured["cfg"]["rules"]["font-normalization"]["target-font"],
+            "Calibri",
+        )
+
+    def test_empty_config_still_uses_defaults(self):
+        captured = {}
+
+        def capturing_lint(path, cfg):
+            captured["cfg"] = cfg
+            return []
+
+        mcp_server._lint_mod.lint = capturing_lint
+
+        mcp_server.lint_document(_b64(), config={})
+
+        self.assertIn("naming-convention", captured["cfg"]["rules"])
+
 
 # ---------------------------------------------------------------------------
 # fix_document
@@ -131,7 +197,12 @@ class TestLintDocument(unittest.TestCase):
 
 class TestFixDocument(unittest.TestCase):
     def setUp(self):
-        mcp_server._fix_mod.DEFAULT_CONFIG = {"rules": {}}
+        mcp_server._fix_mod.DEFAULT_CONFIG = {
+            "rules": {
+                "font-normalization": {"enabled": True, "target-font": "Calibri"},
+                "double-spaces": {"enabled": True, "severity": "warning"},
+            }
+        }
         self._fixer_names = [
             "fix_style_misuse", "fix_font_normalization", "fix_font_size",
             "fix_list_normalization", "fix_heading_level_skip",
@@ -142,14 +213,14 @@ class TestFixDocument(unittest.TestCase):
         for fn in self._fixer_names:
             setattr(mcp_server._fix_mod, fn, MagicMock())
 
-    def _run_fix(self, extra_bytes: bytes = b"fixed") -> dict:
+    def _run_fix(self, extra_bytes: bytes = b"fixed", config: dict | None = None) -> dict:
         fake_doc = MagicMock()
         # Patch docx.Document so the local import inside fix_document gets the mock
         # regardless of whether the real package is already loaded in sys.modules.
         with patch("docx.Document", return_value=fake_doc), \
              patch.object(Path, "read_bytes", return_value=extra_bytes), \
              patch.object(Path, "unlink"):
-            return mcp_server.fix_document(_b64(), filename="test.docx")
+            return mcp_server.fix_document(_b64(), filename="test.docx", config=config)
 
     def test_returns_fixed_docx_base64(self):
         fixed_bytes = b"fixed-docx-bytes"
@@ -165,7 +236,7 @@ class TestFixDocument(unittest.TestCase):
         self._run_fix()
         for fn in self._fixer_names:
             mock = getattr(mcp_server._fix_mod, fn)
-            mock.assert_called_once(), f"{fn} was not called"
+            mock.assert_called_once()
 
     def test_changes_serialised_as_dicts(self):
         """If a fixer appends a (code, before, after) tuple it appears in output."""
@@ -182,6 +253,26 @@ class TestFixDocument(unittest.TestCase):
             result["changes"],
             [{"code": "W019", "before": "hello  world", "after": "hello world"}],
         )
+
+    def test_partial_config_is_merged_with_defaults(self):
+        captured = {}
+
+        def fake_fixer(doc, cfg, applied, changes):
+            captured["cfg"] = cfg
+
+        mcp_server._fix_mod.fix_style_misuse = fake_fixer
+
+        self._run_fix(config={"rules": {"double-spaces": "off"}})
+
+        self.assertFalse(captured["cfg"]["rules"]["double-spaces"]["enabled"])
+        self.assertEqual(
+            captured["cfg"]["rules"]["font-normalization"]["target-font"],
+            "Calibri",
+        )
+
+    def test_invalid_base64_raises_value_error(self):
+        with self.assertRaisesRegex(ValueError, "base64"):
+            mcp_server.fix_document("not-base64!!!")
 
 
 if __name__ == "__main__":
