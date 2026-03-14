@@ -24,6 +24,8 @@ jobs:
         run: |
           python scripts/lint.py --help
           python scripts/fix.py --help
+      - name: MCP server smoke check
+        run: python -c "import sys; sys.path.insert(0, 'scripts'); import mcp_server; print('mcp_server OK')"
 
   markdown:
     runs-on: ubuntu-latest

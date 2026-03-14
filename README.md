@@ -2,12 +2,13 @@
 
 ESLint for Word documents. Analyzes `.docx` files for formatting and structural issues, then auto-fixes the ones it can.
 
-Works in two ways:
+Works in three ways:
 
 | Mode | Where | How |
 | --- | --- | --- |
 | **Claude Code CLI plugin** | Terminal / Claude Code | Runs Python scripts locally — full detection + auto-fix |
 | **Claude.ai / coworker skill** | Claude.ai, Claude Projects, coworker | Claude reads document content — structural rules + fix guidance |
+| **MCP server** | Any MCP-compatible client | AI calls Python tools over stdio — full detection + auto-fix |
 
 ---
 
@@ -45,7 +46,7 @@ Install once, then use slash commands in Claude Code to lint and auto-fix `.docx
 
 **Requirements:** Claude Code, Python 3.9+, `python-docx`
 
-### Installation
+### Install CLI plugin
 
 ```bash
 claude plugin install https://github.com/dboneku/doc-lint
@@ -119,6 +120,82 @@ The filename is ACME-HR-001 Recruitment Policy.docx
 
 ---
 
+## Option 3 — MCP server
+
+Runs as an [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server so any MCP-compatible AI client — Claude Desktop, Cursor, Copilot, or the MCP CLI — can lint and fix `.docx` files directly through tool calls.
+
+**Requirements:** Python 3.9+, `python-docx`, `mcp[cli]>=1.0`
+
+### Install MCP dependencies
+
+```bash
+pip install -r scripts/requirements.txt
+```
+
+### Add to Claude Desktop
+
+Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
+
+```json
+{
+  "mcpServers": {
+    "doc-lint": {
+      "command": "python",
+      "args": ["/absolute/path/to/doc-lint/scripts/mcp_server.py"]
+    }
+  }
+}
+```
+
+Restart Claude Desktop. The three tools below will be available automatically.
+Use the Python interpreter from the environment where you installed `mcp[cli]` and `python-docx` if `python` is not already that interpreter.
+
+### Tools
+
+#### `lint_document`
+
+Lints a `.docx` file and returns a structured report.
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `docx_base64` | string | Base64-encoded `.docx` file contents |
+| `filename` | string | Original filename (used by naming-convention rule W014) |
+| `config` | object \| null | Partial config override; omitted fields inherit defaults |
+
+Returns `{ issues: [...], summary: { total, errors, warnings, info, fixable } }`
+
+#### `fix_document`
+
+Applies all auto-fixable corrections and returns the updated document.
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `docx_base64` | string | Base64-encoded `.docx` file contents |
+| `filename` | string | Original filename (informational) |
+| `config` | object \| null | Partial config override; omitted fields inherit defaults |
+
+Returns `{ fixed_docx_base64: string, applied: [...], changes: [...] }`
+
+#### `get_default_config`
+
+Returns the built-in rule configuration as a JSON object — useful as a starting point for customisation.
+
+Rule overrides are merged on top of the built-in defaults using the same semantics as `.doc-lint.json`. That means you can send only the rules you want to change instead of the full config object.
+
+### Run standalone (stdio)
+
+```bash
+python scripts/mcp_server.py
+```
+
+Or via the MCP CLI:
+
+```bash
+mcp run scripts/mcp_server.py
+```
+
+---
+
 ## Configuration
 
 Create a `.doc-lint.json` in your project to customize rules:
@@ -142,7 +219,7 @@ Create a `.doc-lint.json` in your project to customize rules:
 }
 ```
 
-For CLI use, place `.doc-lint.json` in your project directory. For Claude.ai use, paste the config contents into your prompt.
+For CLI use, place `.doc-lint.json` in your project directory. For Claude.ai use, paste the config contents into your prompt. For MCP use, pass the same object as the `config` argument to `lint_document` or `fix_document`; partial overrides are merged with defaults.
 
 All rules are enabled by default. See the [full rule catalog](skills/doc-lint/references/rules.md) for all options.
 
@@ -165,6 +242,19 @@ The linter exits with code `1` if any errors are found, `0` otherwise — making
 
 ---
 
+## Development
+
+### Validate MCP support
+
+```bash
+python -m unittest discover -s tests -p 'test_*.py'
+python -c "import sys; sys.path.insert(0, 'scripts'); import mcp_server; print('mcp_server OK')"
+```
+
+The test suite covers both mocked MCP tool behavior and `.docx` integration checks. CI also imports `scripts/mcp_server.py` directly as a smoke test.
+
+---
+
 ## Skill files
 
 | File | Purpose |
@@ -180,6 +270,7 @@ The linter exits with code `1` if any errors are found, `0` otherwise — making
 
 - **CLI plugin:** Claude Code, Python 3.9+, `python-docx` (`pip install python-docx`)
 - **Claude.ai skill:** Claude.ai account or Claude API access — no local dependencies
+- **MCP server:** Python 3.9+, `pip install -r scripts/requirements.txt` (`python-docx` + `mcp[cli]`)
 
 ## License
 
